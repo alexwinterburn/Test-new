@@ -357,5 +357,36 @@ table.tbl th.num { text-align: right; }
 .wizard-steps .st.on { background: var(--accent); }
 
 .orderbook-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 3px 0; }
+
+/* ===== Announcements / bell / slip drawer =============================== */
+.banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 16px; font-size: 13px; font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.banner-info { background: var(--accent-soft); color: var(--accent); }
+.banner-warning { background: rgba(250, 178, 25, 0.14); color: var(--warning); }
+.banner-critical { background: var(--no-soft); color: var(--critical); }
+
+.bell-dot {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--critical); color: #fff; border-radius: 999px;
+  font-size: 10px; font-weight: 800; min-width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 4px;
+}
+
+.drawer {
+  position: fixed; top: 66px; right: 14px; bottom: 14px; width: 340px; z-index: 45;
+  display: flex; flex-direction: column; box-shadow: var(--shadow);
+  animation: slide-in .15s ease-out;
+}
+@media (max-width: 700px) { .drawer { left: 14px; width: auto; } }
+
+.feed-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.feed-row:last-child { border-bottom: none; }
+
+.ai-brief { display: flex; flex-direction: column; gap: 10px; }
+.ai-brief .sig { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--surface-2); border-radius: 9px; font-size: 13px; }
+.ai-brief .sig .conf { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
 .progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }

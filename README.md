@@ -34,6 +34,17 @@ npm run build   # type-check + production build
   and unlocks withdrawals; Tier 2 (enhanced) removes caps. Users are prompted to verify
   exactly when they hit a limit — never before.
 - **Responsible trading** — self-imposed daily loss caps and one-way 7-day cool-off.
+- **Combo slip** — build a basket of positions across markets and place it in one
+  click, with total stake, payout-if-all-win and market-implied combo odds. Legs
+  settle independently (a basket, not an all-or-nothing parlay).
+- **Watchlists & price alerts** — star markets, filter the home feed to them, and
+  get notified when a probability crosses a threshold (alerts bell in the nav).
+- **Leaderboard with calibration** — traders ranked by 30-day P&L *and* a
+  Brier-based calibration score, streaks and win rates. Calibration is the
+  credibility metric competitors don't surface.
+- **Market intelligence panel** — per-market activity feed, top holders (with
+  their calibration scores, so you can see if smart money agrees with you), and a
+  simulated AI brief: momentum, source watch, base rates, and order-flow signals.
 
 ### Control Tower (`/admin`)
 - **Dashboard** — volume/trades/signups KPIs, 30-day volume chart, custodial balances,
@@ -50,6 +61,15 @@ npm run build   # type-check + production build
   threshold configuration, fee income estimate.
 - **Risk controls** — circuit breaker (auto-halts a market on an outsized single-trade
   move), per-tier position caps, per-tier withdrawal caps, geo-blocking.
+- **Liquidity desk** — pool depth and cost-to-move per market, thin-book flags,
+  one-click house liquidity injections that deepen books without moving price.
+- **Compliance center** — AML alert queue (trade velocity, deposit structuring,
+  sanctions screening, chargebacks) with acknowledge/dismiss workflow, active
+  cool-off monitoring, and a one-click CSV export for regulators.
+- **Analytics** — signups and trades per day, volume mix by category, and top
+  traders with calibration, feeding market-making and marketing decisions.
+- **Announcements** — compose a site-wide banner (info/warning/critical) with
+  live preview; it appears instantly at the top of the exchange.
 - **Feature flags** — community markets, AI resolution assist, limit orders,
   leaderboards, scalar markets, neg-risk bundles. Ship dark, roll out gradually.
 - **Audit log** — every operator action, filterable.

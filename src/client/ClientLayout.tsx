@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { Avatar, KycBadge, ThemeToggle, Toasts } from '../components/ui'
 import { AuthModal, KycModal } from '../components/auth'
+import { AlertsBell, SlipDrawer } from './extras'
 import { fmtUsd } from '../lib/format'
 
 export const ClientLayout = () => {
@@ -10,16 +11,27 @@ export const ClientLayout = () => {
   const [auth, setAuth] = useState<null | 'signin' | 'signup'>(null)
   const [kyc, setKyc] = useState(false)
   const [menu, setMenu] = useState(false)
+  const [slipOpen, setSlipOpen] = useState(false)
   const nav = useNavigate()
+  const ann = state.settings.announcement
 
   return (
     <div className="shell">
+      {ann && (
+        <div className={`banner banner-${ann.kind}`} role="status">
+          <span aria-hidden="true">{ann.kind === 'critical' ? '🚨' : ann.kind === 'warning' ? '⚠️' : '📣'}</span>
+          <span>{ann.text}</span>
+        </div>
+      )}
       <header className="topnav">
         <div className="topnav-inner">
           <Link to="/" className="logo"><span className="mark">◆</span>Foresight</Link>
           <nav className="nav-links">
             <NavLink to="/" end className={({ isActive }) => (isActive ? 'on' : '')}>Markets</NavLink>
             <NavLink to="/portfolio" className={({ isActive }) => (isActive ? 'on' : '')}>Portfolio</NavLink>
+            {state.settings.featureFlags.leaderboard && (
+              <NavLink to="/leaderboard" className={({ isActive }) => (isActive ? 'on' : '')}>Leaderboard</NavLink>
+            )}
             <NavLink to="/wallet" className={({ isActive }) => (isActive ? 'on' : '')}>Wallet</NavLink>
           </nav>
           <div className="nav-search">
@@ -34,6 +46,10 @@ export const ClientLayout = () => {
             />
           </div>
           <div className="nav-right">
+            <button className="btn btn-ghost btn-sm" style={{ position: 'relative' }} onClick={() => setSlipOpen(o => !o)} aria-label="Combo slip">
+              🧾{state.slip.length > 0 && <span className="bell-dot">{state.slip.length}</span>}
+            </button>
+            <AlertsBell />
             <ThemeToggle />
             {currentUser ? (
               <>
@@ -88,6 +104,7 @@ export const ClientLayout = () => {
 
       {auth && <AuthModal initialMode={auth} onClose={() => setAuth(null)} />}
       {kyc && <KycModal onClose={() => setKyc(false)} />}
+      {slipOpen && <SlipDrawer onClose={() => setSlipOpen(false)} />}
       <Toasts />
     </div>
   )

@@ -115,6 +115,49 @@ export interface User {
   selfLimits: { dailyLossCap: number | null; coolOffUntil: number | null }
   totalDeposited: number
   totalWithdrawn: number
+  watchlist: string[] // market ids
+  // Forecasting stats for the leaderboard (seeded; recomputed server-side in prod)
+  stats: { profit30d: number; calibration: number; resolvedCount: number; winRate: number; streak: number }
+}
+
+export interface TradeEvent {
+  id: string
+  marketId: string
+  userId: string
+  outcomeId: string
+  side: Side
+  direction: Direction
+  shares: number
+  price: number
+  at: number
+}
+
+export interface PriceAlert {
+  id: string
+  userId: string
+  marketId: string
+  outcomeId: string
+  condition: 'above' | 'below'
+  threshold: number // probability 0..1
+  createdAt: number
+  triggeredAt?: number
+}
+
+export interface SlipLeg {
+  marketId: string
+  outcomeId: string
+  side: Side
+  amount: number
+}
+
+export interface ComplianceAlert {
+  id: string
+  userId: string
+  kind: 'velocity' | 'structuring' | 'sanctions' | 'self-limit' | 'chargeback'
+  severity: 'serious' | 'critical'
+  detail: string
+  status: 'open' | 'acknowledged' | 'dismissed'
+  at: number
 }
 
 export interface AuditEntry {
@@ -154,6 +197,7 @@ export interface Settings {
     negRiskBundles: boolean
   }
   dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
+  announcement: { text: string; kind: 'info' | 'warning' | 'critical'; at: number } | null
 }
 
 export interface AppState {
@@ -167,5 +211,9 @@ export interface AppState {
   kycRequests: KycRequest[]
   proposals: MarketProposal[]
   audit: AuditEntry[]
+  trades: TradeEvent[]
+  alerts: PriceAlert[]
+  complianceAlerts: ComplianceAlert[]
+  slip: SlipLeg[]
   settings: Settings
 }

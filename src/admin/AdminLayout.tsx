@@ -33,6 +33,7 @@ export const AdminLayout = () => {
   const kycPending = state.kycRequests.filter(r => r.status === 'pending').length
   const wdPending = state.txs.filter(t => t.type === 'withdrawal' && t.status === 'pending').length
   const propPending = state.proposals.filter(p => p.status === 'pending').length
+  const complianceOpen = state.complianceAlerts.filter(a => a.status === 'open').length
   const resolving = state.markets.filter(m => m.status === 'resolving' || m.status === 'disputed').length
 
   return (
@@ -49,8 +50,12 @@ export const AdminLayout = () => {
         <Item to="/admin/kyc" icon="🪪" label="KYC queue" count={kycPending} />
         <div className="grp">Treasury & risk</div>
         <Item to="/admin/finance" icon="🏦" label="Finance" count={wdPending} />
+        <Item to="/admin/liquidity" icon="💧" label="Liquidity desk" />
         <Item to="/admin/risk" icon="⚠️" label="Risk controls" />
+        <Item to="/admin/compliance" icon="🛡️" label="Compliance" count={complianceOpen} />
         <div className="grp">Platform</div>
+        <Item to="/admin/analytics" icon="📈" label="Analytics" />
+        <Item to="/admin/announce" icon="📣" label="Announcements" />
         <Item to="/admin/flags" icon="🚩" label="Feature flags" />
         <Item to="/admin/audit" icon="📜" label="Audit log" />
         <div style={{ marginTop: 'auto', padding: '14px 11px', display: 'flex', alignItems: 'center', gap: 8 }}>

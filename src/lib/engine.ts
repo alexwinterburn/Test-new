@@ -101,6 +101,28 @@ export const seedPools = (liquidity: number, p: number): { yesPool: number; noPo
   return { yesPool, noPool }
 }
 
+/** Approximate dollar value sitting in an outcome's AMM pools. */
+export const poolValue = (o: Outcome): number => {
+  const p = price(o)
+  return o.yesPool * p + o.noPool * (1 - p)
+}
+
+/** Dollars required to push the YES price up by `dp` (bisection on the CPMM). */
+export const costToMove = (o: Outcome, dp: number): number => {
+  const target = Math.min(0.99, price(o) + dp)
+  let lo = 0
+  let hi = (o.yesPool + o.noPool) * 2
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2
+    const k = o.yesPool * o.noPool
+    const nn = o.noPool + mid
+    const ny = k / nn
+    if (nn / (ny + nn) < target) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
 /** Dollars needed to move price to a limit — used to fill crossable limit orders. */
 export const crossesLimit = (o: Outcome, side: Side, limitPrice: number): boolean =>
   price(o, side) <= limitPrice + 1e-9

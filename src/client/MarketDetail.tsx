@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { price, quoteBuy, quoteSell } from '../lib/engine'
-import { fmtCents, fmtCountdown, fmtDate, fmtPct, fmtPct1, fmtUsd, fmtUsdCompact } from '../lib/format'
+import { fmtAgo, fmtCents, fmtCountdown, fmtDate, fmtPct, fmtPct1, fmtUsd, fmtUsdCompact } from '../lib/format'
 import { PriceChart } from '../components/charts'
-import { StatusBadge, Tabs, Empty } from '../components/ui'
+import { Avatar, StatusBadge, Tabs, Empty } from '../components/ui'
 import { KycModal } from '../components/auth'
-import type { Side } from '../lib/types'
+import type { Market, Side } from '../lib/types'
 
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)']
 const RANGES = [{ l: '1D', ms: 86400000 }, { l: '1W', ms: 7 * 86400000 }, { l: '1M', ms: 30 * 86400000 }, { l: 'All', ms: Infinity }]
@@ -15,7 +15,7 @@ interface Shell { openAuth: () => void; openKyc: () => void }
 
 export const MarketDetail = () => {
   const { id } = useParams()
-  const { state, currentUser, trade, placeLimitOrder, cancelOrder, openPositionCost } = useStore()
+  const { state, currentUser, trade, placeLimitOrder, cancelOrder, openPositionCost, toggleWatch, createAlert, addToSlip } = useStore()
   const { openAuth } = useOutletContext<Shell>()
   const m = state.markets.find(x => x.id === id)
 
@@ -28,6 +28,10 @@ export const MarketDetail = () => {
   const [limitShares, setLimitShares] = useState('100')
   const [range, setRange] = useState('1M')
   const [kycReason, setKycReason] = useState<string | null>(null)
+  const [alertOpen, setAlertOpen] = useState(false)
+  const [alertCond, setAlertCond] = useState<'above' | 'below'>('above')
+  const [alertPct, setAlertPct] = useState('70')
+  const [intel, setIntel] = useState<'activity' | 'holders' | 'brief'>('activity')
 
   if (!m) return <main className="page-inner"><Empty icon="🤷" text="Market not found" /></main>
 
@@ -89,6 +93,14 @@ export const MarketDetail = () => {
             {m.creator !== 'foresight' && <span className="badge badge-accent"><span className="dot" />Community market</span>}
           </div>
         </div>
+        <button
+          className="btn btn-sm"
+          style={{ fontSize: 16, color: currentUser?.watchlist.includes(m.id) ? 'var(--warning)' : 'var(--ink-3)' }}
+          onClick={() => toggleWatch(m.id)}
+          title={currentUser?.watchlist.includes(m.id) ? 'Remove from watchlist' : 'Add to watchlist'}
+        >
+          {currentUser?.watchlist.includes(m.id) ? '★' : '☆'}
+        </button>
       </div>
 
       {m.status === 'halted' && (
@@ -128,13 +140,26 @@ export const MarketDetail = () => {
                 )}
               </div>
             )}
-            <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 4 }}>
+            <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 4, gap: 10 }}>
+              <button className="btn btn-sm btn-ghost" onClick={() => setAlertOpen(o => !o)}>🔔 Alert</button>
               <div className="range-row">
                 {RANGES.map(r => (
                   <button key={r.l} className={r.l === range ? 'on' : ''} onClick={() => setRange(r.l)}>{r.l}</button>
                 ))}
               </div>
             </div>
+            {alertOpen && (
+              <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8, gap: 8, fontSize: 13 }}>
+                <span className="muted">Notify me when {isMulti ? selOutcome.label : 'YES'} goes</span>
+                <select className="select" style={{ width: 90, padding: '5px 8px' }} value={alertCond} onChange={e => setAlertCond(e.target.value as 'above' | 'below')}>
+                  <option value="above">above</option>
+                  <option value="below">below</option>
+                </select>
+                <input className="input" style={{ width: 70, padding: '5px 8px' }} type="number" min={1} max={99} value={alertPct} onChange={e => setAlertPct(e.target.value)} />
+                <span className="muted">%</span>
+                <button className="btn btn-sm btn-primary" onClick={() => { createAlert(m.id, selOutcome.id, alertCond, (parseFloat(alertPct) || 50) / 100); setAlertOpen(false) }}>Set</button>
+              </div>
+            )}
             {chartSeries.length ? <PriceChart series={chartSeries} /> : <Empty icon="📈" text="Not enough history for this range" />}
           </div>
 
@@ -214,6 +239,20 @@ export const MarketDetail = () => {
               ))}
             </div>
           )}
+
+          <div className="card card-pad stack" style={{ gap: 10 }}>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <div className="section-head" style={{ margin: 0 }}><h2>Market intelligence</h2></div>
+              <Tabs value={intel} onChange={setIntel} options={[
+                { value: 'activity', label: 'Activity' },
+                { value: 'holders', label: 'Top holders' },
+                { value: 'brief', label: '🤖 AI brief' },
+              ]} />
+            </div>
+            {intel === 'activity' && <ActivityFeed m={m} />}
+            {intel === 'holders' && <TopHolders m={m} />}
+            {intel === 'brief' && <AiBrief m={m} delta={delta} p={p} />}
+          </div>
 
           <div className="card card-pad stack" style={{ gap: 10 }}>
             <div className="section-head" style={{ margin: 0 }}><h2>About this market</h2></div>
@@ -324,6 +363,11 @@ export const MarketDetail = () => {
                 : orderType === 'limit' ? 'Place limit order'
                 : `Buy ${side.toUpperCase()}`}
             </button>
+            {mode === 'buy' && orderType === 'market' && m.status === 'active' && (
+              <button className="btn" onClick={() => addToSlip({ marketId: m.id, outcomeId: selOutcome.id, side, amount: amt > 0 ? amt : 10 })}>
+                🧾 Add to combo slip
+              </button>
+            )}
 
             {currentUser && currentUser.kycTier < 2 && capacityLeft < 1e11 && (
               <div className="hint">
@@ -359,6 +403,92 @@ export const MarketDetail = () => {
 
       {kycReason && <KycModal reason={kycReason} onClose={() => setKycReason(null)} />}
     </main>
+  )
+}
+
+const ActivityFeed = ({ m }: { m: Market }) => {
+  const { state, userById } = useStore()
+  const rows = state.trades.filter(t => t.marketId === m.id).slice(0, 10)
+  if (!rows.length) return <Empty icon="💤" text="No recent trades" />
+  return (
+    <div>
+      {rows.map(t => {
+        const u = userById(t.userId)
+        const o = m.outcomes.find(x => x.id === t.outcomeId)
+        return (
+          <div className="feed-row" key={t.id}>
+            {u && <Avatar user={u} size={24} />}
+            <span style={{ flex: 1 }}>
+              <strong>@{u?.handle ?? 'trader'}</strong> {t.direction === 'buy' ? 'bought' : 'sold'} {t.shares.toFixed(0)}{' '}
+              <strong style={{ color: t.side === 'yes' ? 'var(--yes)' : 'var(--no)' }}>{t.side.toUpperCase()}</strong>
+              {m.type === 'multi' && o ? ` · ${o.label}` : ''} @ {fmtCents(t.price)}
+            </span>
+            <span className="muted">{fmtAgo(t.at)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const TopHolders = ({ m }: { m: Market }) => {
+  const { state, userById } = useStore()
+  const holders = state.positions
+    .filter(p => p.marketId === m.id)
+    .map(p => {
+      const o = m.outcomes.find(x => x.id === p.outcomeId)!
+      return { ...p, value: p.shares * price(o, p.side), outcomeLabel: o.label }
+    })
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6)
+  if (!holders.length) return <Empty icon="🐋" text="No positions yet" sub="Be the first to take a side." />
+  return (
+    <div>
+      {holders.map(h => {
+        const u = userById(h.userId)
+        return (
+          <div className="feed-row" key={h.id}>
+            {u && <Avatar user={u} size={24} />}
+            <span style={{ flex: 1 }}>
+              <strong>@{u?.handle}</strong>
+              <span className="muted"> · calib {u ? fmtPct(u.stats.calibration) : '—'}</span>
+            </span>
+            <span>
+              {h.shares.toFixed(0)} <strong style={{ color: h.side === 'yes' ? 'var(--yes)' : 'var(--no)' }}>{h.side.toUpperCase()}</strong>
+              {m.type === 'multi' ? ` · ${h.outcomeLabel}` : ''}
+            </span>
+            <span className="mono" style={{ width: 76, textAlign: 'right' }}>{fmtUsd(h.value, 0)}</span>
+          </div>
+        )
+      })}
+      <div className="hint" style={{ marginTop: 8 }}>
+        Holder calibration scores let you see whether the smart money is on your side — a transparency layer competitors don't surface.
+      </div>
+    </div>
+  )
+}
+
+const AiBrief = ({ m, delta, p }: { m: Market; delta: number; p: number }) => {
+  const sigs = [
+    { icon: '📊', text: `Market-implied probability is ${fmtPct(p)}, ${Math.abs(delta) < 0.005 ? 'flat' : (delta > 0 ? 'up' : 'down') + ' ' + fmtPct1(Math.abs(delta))} over 24h. ${Math.abs(delta) > 0.03 ? 'Momentum is unusually strong versus this market’s 30-day realized volatility.' : 'Price action is within normal range.'}`, conf: 0.98 },
+    { icon: '📰', text: `Source watch (${m.resolutionSource}): no resolution-relevant publication detected in the last 24h. Next scheduled data point is being tracked automatically.`, conf: 0.84 },
+    { icon: '📚', text: `Base rate: in similar historical ${m.category.toLowerCase()} markets, outcomes trading at ${fmtPct(p)} thirty days out resolved YES ${fmtPct(Math.min(0.95, Math.max(0.05, p + 0.02)))} of the time — the market is roughly calibrated here.`, conf: 0.77 },
+    { icon: '🐋', text: 'Flow: net order flow over the last 48h skews ' + (delta >= 0 ? 'toward YES, driven by mid-size accounts with above-median calibration.' : 'toward NO; the largest holder has not changed position.'), conf: 0.81 },
+  ]
+  return (
+    <div className="ai-brief">
+      {sigs.map((s, i) => (
+        <div className="sig" key={i}>
+          <span aria-hidden="true">{s.icon}</span>
+          <span style={{ flex: 1 }}>{s.text}</span>
+          <span className="conf muted">conf {fmtPct(s.conf)}</span>
+        </div>
+      ))}
+      <div className="hint">
+        Simulated in this prototype. In production, an agent continuously reads the market's declared sources and publishes these
+        signals with citations — the same pipeline that drafts resolution memos, so traders and resolvers see identical evidence.
+      </div>
+    </div>
   )
 }
 

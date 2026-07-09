@@ -1,18 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppState, Direction, KycTier, Market, MarketStatus, Order, Outcome, Position, Settings, Side, User } from './types'
+import type { AppState, ComplianceAlert, Direction, KycTier, Market, MarketStatus, Order, Outcome, Position, Settings, Side, SlipLeg, User } from './types'
 import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v3'
+const LS_KEY = 'foresight-demo-state-v4'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 3) return parsed
+      if (parsed.version === 4) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -48,6 +48,16 @@ interface StoreApi {
   setSelfLimits: (limits: User['selfLimits']) => void
   proposeMarket: (question: string, category: string, source: string) => void
 
+  toggleWatch: (marketId: string) => void
+  createAlert: (marketId: string, outcomeId: string, condition: 'above' | 'below', threshold: number) => void
+  deleteAlert: (alertId: string) => void
+
+  addToSlip: (leg: SlipLeg) => void
+  removeFromSlip: (index: number) => void
+  setSlipAmount: (index: number, amount: number) => void
+  clearSlip: () => void
+  placeSlip: () => TradeResult
+
   // Admin
   adminCreateMarket: (m: {
     question: string; description: string; rules: string; category: string; icon: string
@@ -67,6 +77,10 @@ interface StoreApi {
   adminAdjustBalance: (userId: string, amount: number, note: string) => void
   adminUpdateSettings: (patch: Partial<Settings>) => void
   adminToggleFlag: (flag: keyof Settings['featureFlags']) => void
+  adminAddLiquidity: (marketId: string, amount: number) => void
+  adminReviewComplianceAlert: (alertId: string, status: ComplianceAlert['status']) => void
+  adminSetAnnouncement: (text: string, kind: 'info' | 'warning' | 'critical') => void
+  adminClearAnnouncement: () => void
   resetDemo: () => void
 }
 
@@ -120,6 +134,26 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       if (h.length > 2000) h.splice(0, h.length - 2000)
     }
 
+    const recordTrade = (draft: AppState, userId: string, m: Market, outcomeId: string, side: Side, direction: Direction, shares: number, px: number) => {
+      draft.trades.unshift({ id: shortId(), marketId: m.id, userId, outcomeId, side, direction, shares, price: px, at: Date.now() })
+      if (draft.trades.length > 300) draft.trades.length = 300
+    }
+
+    /** Trigger any price alerts crossed by the latest move on this market. */
+    const checkAlerts = (draft: AppState, m: Market) => {
+      for (const a of draft.alerts) {
+        if (a.marketId !== m.id || a.triggeredAt) continue
+        const o = m.outcomes.find(x => x.id === a.outcomeId)
+        if (!o) continue
+        const p = price(o)
+        if ((a.condition === 'above' && p >= a.threshold) || (a.condition === 'below' && p <= a.threshold)) {
+          a.triggeredAt = Date.now()
+          if (a.userId === draft.sessionUserId)
+            toast('info', `🔔 Alert: “${m.question.slice(0, 45)}…” is now ${a.condition} ${Math.round(a.threshold * 100)}% (${Math.round(p * 100)}%)`)
+        }
+      }
+    }
+
     const upsertPosition = (draft: AppState, userId: string, m: Market, outcomeId: string, side: Side, shares: number, costPerShare: number) => {
       let pos = draft.positions.find(p => p.userId === userId && p.marketId === m.id && p.outcomeId === outcomeId && p.side === side)
       if (!pos) {
@@ -156,6 +190,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         ord.status = ord.filled >= ord.shares - 0.01 ? 'filled' : 'partial'
         m.volume += actualSpend
         pushHistory(draft, m, m.outcomes[idx])
+        recordTrade(draft, user.id, m, o.id, ord.side, 'buy', filled, q.avgPrice)
+        checkAlerts(draft, m)
         draft.txs.unshift({ id: shortId(), userId: user.id, type: 'trade', amount: -actualSpend, status: 'completed', note: `Limit fill: ${filled.toFixed(0)} ${ord.side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
       }
     }
@@ -198,6 +234,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             avatarHue: Math.floor(Math.random() * 360), balance: 100, kycTier: 0, kycStatus: 'none',
             country: 'US', createdAt: Date.now(), isAdmin: false, suspended: false, riskFlags: [],
             selfLimits: { dailyLossCap: null, coolOffUntil: null }, totalDeposited: 0, totalWithdrawn: 0,
+            watchlist: [], stats: { profit30d: 0, calibration: 0.5, resolvedCount: 0, winRate: 0, streak: 0 },
           }
           d.users.push(u)
           d.sessionUserId = u.id
@@ -243,6 +280,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             dm.volume += spend
             upsertPosition(d, du.id, dm, outcomeId, side, q.shares, q.avgPrice)
             pushHistory(d, dm, dm.outcomes[idx])
+            recordTrade(d, du.id, dm, outcomeId, side, 'buy', q.shares, q.avgPrice)
+            checkAlerts(d, dm)
             d.txs.unshift({ id: shortId(), userId: du.id, type: 'trade', amount: -amount, status: 'completed', note: `Buy ${q.shares.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
             if (fee > 0) d.txs.unshift({ id: shortId(), userId: du.id, type: 'fee', amount: 0, status: 'completed', note: `Trading fee ${fmtUsd(fee)} included`, createdAt: Date.now() })
             const newP = price(dm.outcomes[idx])
@@ -275,6 +314,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             dp.realizedPnl += net - amount * dp.avgPrice
             if (dp.shares < 0.01) d.positions = d.positions.filter(p => p.id !== dp.id)
             pushHistory(d, dm, dm.outcomes[idx])
+            recordTrade(d, du.id, dm, outcomeId, side, 'sell', amount, q.avgPrice)
+            checkAlerts(d, dm)
             d.txs.unshift({ id: shortId(), userId: du.id, type: 'trade', amount: net, status: 'completed', note: `Sell ${amount.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
             fillCrossable(d, marketId)
           })
@@ -361,6 +402,58 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           d.proposals.unshift({ id: shortId(), userId: u.id, question, category, resolutionSource: source, status: 'pending', submittedAt: Date.now() })
         })
         toast('success', 'Market proposal submitted for review')
+      },
+
+      toggleWatch: (marketId) => {
+        const u = currentUser
+        if (!u) { toast('info', 'Sign in to build a watchlist'); return }
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          du.watchlist = du.watchlist.includes(marketId)
+            ? du.watchlist.filter(id => id !== marketId)
+            : [...du.watchlist, marketId]
+        })
+      },
+
+      createAlert: (marketId, outcomeId, condition, threshold) => {
+        const u = currentUser
+        if (!u) { toast('info', 'Sign in to set alerts'); return }
+        mutate(d => {
+          d.alerts.unshift({ id: shortId(), userId: u.id, marketId, outcomeId, condition, threshold, createdAt: Date.now() })
+        })
+        toast('success', `Alert set: notify when price goes ${condition} ${Math.round(threshold * 100)}%`)
+      },
+
+      deleteAlert: (alertId) => {
+        mutate(d => { d.alerts = d.alerts.filter(a => a.id !== alertId) })
+      },
+
+      addToSlip: (leg) => {
+        mutate(d => {
+          const existing = d.slip.findIndex(l => l.marketId === leg.marketId && l.outcomeId === leg.outcomeId)
+          if (existing >= 0) d.slip[existing] = leg
+          else d.slip.push(leg)
+        })
+        toast('info', 'Added to combo slip')
+      },
+      removeFromSlip: (index) => { mutate(d => { d.slip.splice(index, 1) }) },
+      setSlipAmount: (index, amount) => { mutate(d => { if (d.slip[index]) d.slip[index].amount = amount }) },
+      clearSlip: () => { mutate(d => { d.slip = [] }) },
+
+      placeSlip: () => {
+        const u = currentUser
+        if (!u) return { ok: false, error: 'Sign in to trade.' }
+        const legs = s.slip
+        if (!legs.length) return { ok: false, error: 'Slip is empty.' }
+        const total = legs.reduce((a, l) => a + l.amount, 0)
+        if (total > u.balance) return { ok: false, error: 'Insufficient balance for the full slip.' }
+        for (const leg of legs) {
+          const res = self.trade(leg.marketId, leg.outcomeId, leg.side, 'buy', leg.amount)
+          if (!res.ok) { toast('error', `Slip stopped: ${res.error}`); return res }
+        }
+        mutate(d => { d.slip = [] })
+        toast('success', `Combo placed — ${legs.length} legs, ${fmtUsd(total)} total`)
+        return { ok: true }
       },
 
       // ---- Admin actions -------------------------------------------------
@@ -511,6 +604,47 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           d.settings.featureFlags[flag] = !d.settings.featureFlags[flag]
           audit(d, 'settings.flag', `${flag} → ${d.settings.featureFlags[flag] ? 'on' : 'off'}`)
         })
+      },
+
+      adminAddLiquidity: (marketId, amount) => {
+        mutate(d => {
+          const m = d.markets.find(x => x.id === marketId)!
+          for (const o of m.outcomes) {
+            // scale both pools proportionally: deepens the book without moving the price
+            const value = o.yesPool * (o.noPool / (o.yesPool + o.noPool)) + o.noPool * (o.yesPool / (o.yesPool + o.noPool))
+            const factor = 1 + (amount / m.outcomes.length) / Math.max(1, value)
+            o.yesPool *= factor
+            o.noPool *= factor
+          }
+          audit(d, 'liquidity.add', `Added ${fmtUsd(amount, 0)} house liquidity to "${m.question.slice(0, 50)}"`)
+        })
+        toast('success', 'Liquidity added — book deepened at the current price')
+      },
+
+      adminReviewComplianceAlert: (alertId, status) => {
+        mutate(d => {
+          const a = d.complianceAlerts.find(x => x.id === alertId)!
+          a.status = status
+          const u = d.users.find(x => x.id === a.userId)
+          audit(d, 'compliance.review', `${a.kind} alert on @${u?.handle} → ${status}`)
+        })
+        toast('info', `Alert ${status}`)
+      },
+
+      adminSetAnnouncement: (text, kind) => {
+        mutate(d => {
+          d.settings.announcement = { text, kind, at: Date.now() }
+          audit(d, 'platform.announce', `Published ${kind} banner: "${text.slice(0, 60)}"`)
+        })
+        toast('success', 'Announcement is live on the exchange')
+      },
+
+      adminClearAnnouncement: () => {
+        mutate(d => {
+          d.settings.announcement = null
+          audit(d, 'platform.announce', 'Cleared site banner')
+        })
+        toast('info', 'Announcement removed')
       },
 
       resetDemo: () => {

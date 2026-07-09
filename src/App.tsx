@@ -11,6 +11,8 @@ import { AdminMarkets } from './admin/Markets'
 import { MarketCreate } from './admin/MarketCreate'
 import { AdminKyc, AdminUsers } from './admin/Users'
 import { AdminAudit, AdminFinance, AdminFlags, AdminProposals, AdminRisk } from './admin/Ops'
+import { AdminAnalytics, AdminAnnounce, AdminCompliance, AdminLiquidity } from './admin/Desk'
+import { Leaderboard } from './client/Leaderboard'
 
 export const App = () => (
   <StoreProvider>
@@ -20,6 +22,7 @@ export const App = () => (
           <Route path="/" element={<Home />} />
           <Route path="/market/:id" element={<MarketDetail />} />
           <Route path="/portfolio" element={<Portfolio />} />
+          <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/wallet" element={<Wallet />} />
         </Route>
         <Route path="/admin" element={<AdminLayout />}>
@@ -30,7 +33,11 @@ export const App = () => (
           <Route path="users" element={<AdminUsers />} />
           <Route path="kyc" element={<AdminKyc />} />
           <Route path="finance" element={<AdminFinance />} />
+          <Route path="liquidity" element={<AdminLiquidity />} />
           <Route path="risk" element={<AdminRisk />} />
+          <Route path="compliance" element={<AdminCompliance />} />
+          <Route path="analytics" element={<AdminAnalytics />} />
+          <Route path="announce" element={<AdminAnnounce />} />
           <Route path="flags" element={<AdminFlags />} />
           <Route path="audit" element={<AdminAudit />} />
         </Route>

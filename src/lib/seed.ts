@@ -171,7 +171,10 @@ const mkUser = (
   id, email, name, handle, avatarHue: hue, balance, kycTier: tier, kycStatus, country,
   createdAt: now() - 90 * DAY, isAdmin, suspended: false, riskFlags: [],
   selfLimits: { dailyLossCap: null, coolOffUntil: null },
-  totalDeposited: balance * 1.4, totalWithdrawn: 0, ...extras,
+  totalDeposited: balance * 1.4, totalWithdrawn: 0,
+  watchlist: [],
+  stats: { profit30d: 0, calibration: 0.5, resolvedCount: 0, winRate: 0, streak: 0 },
+  ...extras,
 })
 
 export const buildSeed = (): AppState => {
@@ -207,12 +210,27 @@ export const buildSeed = (): AppState => {
 
   const users: User[] = [
     mkUser('u-admin', 'ops@foresight.demo', 'Foresight Ops', 'foresight-ops', 260, 0, 2, 'approved', 'US', true),
-    mkUser('u-demo', 'alex.winterburn@gmail.com', 'Alex Winterburn', 'alexw', 210, 2450.0, 0, 'none', 'GB', false, { totalDeposited: 3000 }),
-    mkUser('u-dana', 'dana@example.com', 'Dana Okafor', 'danapredicts', 150, 18240.5, 2, 'approved', 'NG', false, { totalDeposited: 40000, totalWithdrawn: 12000 }),
-    mkUser('u-marcus', 'marcus@example.com', 'Marcus Lee', 'mlee', 30, 512.75, 1, 'approved', 'SG'),
-    mkUser('u-priya', 'priya@example.com', 'Priya Sharma', 'priyafx', 320, 7311.2, 1, 'approved', 'IN', false, { riskFlags: ['velocity: 14 trades/hr on 2026-07-02'] }),
-    mkUser('u-jonas', 'jonas@example.com', 'Jonas Weber', 'jw_berlin', 80, 96.1, 0, 'pending', 'DE'),
-    mkUser('u-sam', 'sam@example.com', 'Sam Carter', 'samc', 10, 1204.9, 0, 'none', 'US'),
+    mkUser('u-demo', 'alex.winterburn@gmail.com', 'Alex Winterburn', 'alexw', 210, 2450.0, 0, 'none', 'GB', false, {
+      totalDeposited: 3000, watchlist: ['m-0', 'm-2', 'm-3'],
+      stats: { profit30d: 76.8, calibration: 0.71, resolvedCount: 4, winRate: 0.5, streak: 2 },
+    }),
+    mkUser('u-dana', 'dana@example.com', 'Dana Okafor', 'danapredicts', 150, 18240.5, 2, 'approved', 'NG', false, {
+      totalDeposited: 40000, totalWithdrawn: 12000,
+      stats: { profit30d: 4830.2, calibration: 0.88, resolvedCount: 62, winRate: 0.64, streak: 7 },
+    }),
+    mkUser('u-marcus', 'marcus@example.com', 'Marcus Lee', 'mlee', 30, 512.75, 1, 'approved', 'SG', false, {
+      stats: { profit30d: 214.4, calibration: 0.79, resolvedCount: 18, winRate: 0.56, streak: 3 },
+    }),
+    mkUser('u-priya', 'priya@example.com', 'Priya Sharma', 'priyafx', 320, 7311.2, 1, 'approved', 'IN', false, {
+      riskFlags: ['velocity: 14 trades/hr on 2026-07-02'],
+      stats: { profit30d: -389.5, calibration: 0.62, resolvedCount: 41, winRate: 0.44, streak: -2 },
+    }),
+    mkUser('u-jonas', 'jonas@example.com', 'Jonas Weber', 'jw_berlin', 80, 96.1, 0, 'pending', 'DE', false, {
+      stats: { profit30d: 12.1, calibration: 0.55, resolvedCount: 3, winRate: 0.33, streak: 1 },
+    }),
+    mkUser('u-sam', 'sam@example.com', 'Sam Carter', 'samc', 10, 1204.9, 0, 'none', 'US', false, {
+      stats: { profit30d: 508.9, calibration: 0.83, resolvedCount: 22, winRate: 0.59, streak: 5 },
+    }),
   ]
 
   const positions = [
@@ -256,6 +274,33 @@ export const buildSeed = (): AppState => {
     { id: 'a-4', actorId: 'u-admin', actorName: 'Foresight Ops', action: 'risk.flag', detail: 'Velocity flag added to @priyafx', at: t - 6 * DAY },
   ]
 
+  // Recent public trade feed (most recent first)
+  const traderIds = ['u-dana', 'u-marcus', 'u-priya', 'u-sam', 'u-demo']
+  const activeMarketIdx = [0, 1, 2, 3, 5, 8, 11]
+  const trades = Array.from({ length: 48 }, (_, i) => {
+    const mi = activeMarketIdx[Math.floor(rng() * activeMarketIdx.length)]
+    const m = markets[mi]
+    const o = m.outcomes[Math.floor(rng() * m.outcomes.length)]
+    const side = rng() > 0.45 ? ('yes' as const) : ('no' as const)
+    const hist = m.history[o.id]
+    const p = hist[hist.length - 1].p
+    return {
+      id: 'tr-' + i,
+      marketId: m.id, userId: traderIds[Math.floor(rng() * traderIds.length)],
+      outcomeId: o.id, side, direction: rng() > 0.25 ? ('buy' as const) : ('sell' as const),
+      shares: Math.round(10 + rng() * 900),
+      price: side === 'yes' ? p : 1 - p,
+      at: t - i * (0.4 + rng() * 2.2) * 3600000,
+    }
+  })
+
+  const complianceAlerts = [
+    { id: 'ca-1', userId: 'u-priya', kind: 'velocity' as const, severity: 'serious' as const, status: 'open' as const, detail: '14 trades in 60 minutes on 2026-07-02 (threshold 10). Pattern consistent with API-driven activity on a retail account.', at: t - 6 * DAY },
+    { id: 'ca-2', userId: 'u-sam', kind: 'structuring' as const, severity: 'critical' as const, status: 'open' as const, detail: '3 deposits of $980–$995 within 48h, each just under the $1,000 auto-review threshold.', at: t - 1.1 * DAY },
+    { id: 'ca-3', userId: 'u-jonas', kind: 'sanctions' as const, severity: 'critical' as const, status: 'open' as const, detail: 'Fuzzy name match (87%) against consolidated screening list entry J. Webber. Manual review required before KYC approval.', at: t - 0.9 * DAY },
+    { id: 'ca-4', userId: 'u-marcus', kind: 'chargeback' as const, severity: 'serious' as const, status: 'acknowledged' as const, detail: 'Card issuer inquiry on $250 deposit (resolved in user’s favour 2026-06-28).', at: t - 11 * DAY },
+  ]
+
   // 30 days of platform metrics for the admin dashboard
   const dailyVolume = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(t - (29 - i) * DAY)
@@ -269,9 +314,10 @@ export const buildSeed = (): AppState => {
   })
 
   return {
-    version: 3,
+    version: 4,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
+    trades, complianceAlerts, alerts: [], slip: [],
     settings: {
       tradingFeeBps: 100,
       withdrawalFeeFlat: 0,
@@ -289,6 +335,7 @@ export const buildSeed = (): AppState => {
         negRiskBundles: false,
       },
       dailyVolume,
+      announcement: null,
     },
   }
 }

@@ -5,10 +5,10 @@ import { MarketCard } from './MarketCard'
 import { Empty } from '../components/ui'
 import { fmtUsdCompact } from '../lib/format'
 
-const CATEGORIES = ['All', 'Trending', 'Politics', 'Economics', 'Crypto', 'AI & Tech', 'Sports', 'Science', 'Climate', 'Culture', 'Resolved']
+const CATEGORIES = ['All', 'Trending', '★ Watchlist', 'Politics', 'Economics', 'Crypto', 'AI & Tech', 'Sports', 'Science', 'Climate', 'Culture', 'Resolved']
 
 export const Home = () => {
-  const { state } = useStore()
+  const { state, currentUser } = useStore()
   const [params] = useSearchParams()
   const q = (params.get('q') ?? '').toLowerCase()
   const [cat, setCat] = useState('All')
@@ -17,11 +17,12 @@ export const Home = () => {
     let ms = state.markets.filter(m => m.status !== 'draft')
     if (q) ms = ms.filter(m => (m.question + ' ' + m.tags.join(' ') + ' ' + m.category).toLowerCase().includes(q))
     if (cat === 'Trending') ms = [...ms].filter(m => m.status === 'active').sort((a, b) => b.volume - a.volume)
+    else if (cat === '★ Watchlist') ms = ms.filter(m => currentUser?.watchlist.includes(m.id))
     else if (cat === 'Resolved') ms = ms.filter(m => m.status === 'resolved')
     else if (cat !== 'All') ms = ms.filter(m => m.category === cat)
     if (cat === 'All') ms = [...ms].sort((a, b) => Number(b.featured) - Number(a.featured) || b.volume - a.volume)
     return ms
-  }, [state.markets, q, cat])
+  }, [state.markets, q, cat, currentUser])
 
   const totalVol = state.markets.reduce((a, m) => a + m.volume, 0)
   const active = state.markets.filter(m => m.status === 'active').length
@@ -63,7 +64,11 @@ export const Home = () => {
       <div className="market-grid" style={{ marginTop: 14 }}>
         {visible.map(m => <MarketCard key={m.id} market={m} />)}
       </div>
-      {!visible.length && <Empty icon="🔍" text="No markets match" sub="Try a different search or category." />}
+      {!visible.length && (
+        cat === '★ Watchlist'
+          ? <Empty icon="⭐" text="Your watchlist is empty" sub="Star any market from its page to track it here." />
+          : <Empty icon="🔍" text="No markets match" sub="Try a different search or category." />
+      )}
     </main>
   )
 }
