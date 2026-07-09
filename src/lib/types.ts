@@ -1,0 +1,171 @@
+export type KycTier = 0 | 1 | 2
+export type KycStatus = 'none' | 'pending' | 'approved' | 'rejected'
+export type MarketType = 'binary' | 'multi' | 'scalar'
+export type MarketStatus = 'draft' | 'active' | 'halted' | 'closed' | 'resolving' | 'disputed' | 'resolved'
+export type OracleType = 'admin' | 'committee' | 'ai-assisted' | 'external'
+export type Side = 'yes' | 'no'
+export type Direction = 'buy' | 'sell'
+
+export interface PricePoint {
+  t: number // epoch ms
+  p: number // probability 0..1
+}
+
+export interface Outcome {
+  id: string
+  label: string
+  // Constant-product AMM pools (share tokens held by the pool)
+  yesPool: number
+  noPool: number
+  resolved?: Side // set when market resolves: 'yes' if this outcome occurred
+}
+
+export interface Market {
+  id: string
+  slug: string
+  question: string
+  description: string
+  rules: string
+  category: string
+  tags: string[]
+  icon: string // emoji
+  type: MarketType
+  outcomes: Outcome[]
+  scalarRange?: { min: number; max: number; unit: string }
+  createdAt: number
+  closesAt: number
+  resolutionSource: string
+  oracle: OracleType
+  status: MarketStatus
+  haltReason?: string
+  proposedResolution?: { outcomeId: string; side: Side; proposedAt: number; disputeEndsAt: number; by: string }
+  resolvedAt?: number
+  volume: number
+  feeBps: number
+  featured: boolean
+  creator: string // 'foresight' | user id (community markets)
+  history: Record<string, PricePoint[]> // outcomeId -> series
+}
+
+export interface Position {
+  id: string
+  userId: string
+  marketId: string
+  outcomeId: string
+  side: Side
+  shares: number
+  avgPrice: number // cost per share paid on average
+  realizedPnl: number
+}
+
+export interface Order {
+  id: string
+  userId: string
+  marketId: string
+  outcomeId: string
+  side: Side
+  direction: Direction
+  limitPrice: number
+  shares: number
+  filled: number
+  status: 'open' | 'filled' | 'partial' | 'cancelled'
+  createdAt: number
+}
+
+export type TxType = 'deposit' | 'withdrawal' | 'trade' | 'settlement' | 'fee' | 'adjustment'
+export type TxStatus = 'completed' | 'pending' | 'rejected'
+
+export interface Tx {
+  id: string
+  userId: string
+  type: TxType
+  amount: number // positive = credit to user, negative = debit
+  status: TxStatus
+  note: string
+  createdAt: number
+}
+
+export interface KycRequest {
+  id: string
+  userId: string
+  requestedTier: KycTier
+  docType: string
+  country: string
+  status: 'pending' | 'approved' | 'rejected'
+  submittedAt: number
+  reviewedAt?: number
+  reviewedBy?: string
+  rejectReason?: string
+}
+
+export interface User {
+  id: string
+  email: string
+  name: string
+  handle: string
+  avatarHue: number
+  balance: number
+  kycTier: KycTier
+  kycStatus: KycStatus
+  country: string
+  createdAt: number
+  isAdmin: boolean
+  suspended: boolean
+  riskFlags: string[]
+  selfLimits: { dailyLossCap: number | null; coolOffUntil: number | null }
+  totalDeposited: number
+  totalWithdrawn: number
+}
+
+export interface AuditEntry {
+  id: string
+  actorId: string
+  actorName: string
+  action: string
+  detail: string
+  at: number
+}
+
+export interface MarketProposal {
+  id: string
+  userId: string
+  question: string
+  category: string
+  resolutionSource: string
+  status: 'pending' | 'approved' | 'rejected'
+  submittedAt: number
+}
+
+export interface Settings {
+  tradingFeeBps: number
+  withdrawalFeeFlat: number
+  // KYC gating: max cumulative trade notional per tier ($). Withdrawals need tier >= 1.
+  tierTradeCaps: { 0: number; 1: number; 2: number }
+  withdrawalAutoApproveUnder: number
+  withdrawalDailyCap: { 1: number; 2: number }
+  circuitBreaker: { enabled: boolean; movePct: number }
+  geoBlocked: string[]
+  featureFlags: {
+    communityMarkets: boolean
+    aiResolutionAssist: boolean
+    limitOrders: boolean
+    leaderboard: boolean
+    scalarMarkets: boolean
+    negRiskBundles: boolean
+  }
+  dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
+}
+
+export interface AppState {
+  version: number
+  sessionUserId: string | null
+  users: User[]
+  markets: Market[]
+  positions: Position[]
+  orders: Order[]
+  txs: Tx[]
+  kycRequests: KycRequest[]
+  proposals: MarketProposal[]
+  audit: AuditEntry[]
+  settings: Settings
+}
