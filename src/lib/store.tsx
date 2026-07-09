@@ -5,14 +5,14 @@ import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v4'
+const LS_KEY = 'foresight-demo-state-v5'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 4) return parsed
+      if (parsed.version === 5) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -33,7 +33,7 @@ interface StoreApi {
   marketById: (id: string) => Market | undefined
 
   signIn: (email: string) => { ok: boolean; error?: string }
-  signUp: (email: string, name: string) => { ok: boolean; error?: string }
+  signUp: (email: string, name: string, referralCode?: string) => { ok: boolean; error?: string }
   signOut: () => void
   signInAsAdmin: () => void
 
@@ -42,8 +42,16 @@ interface StoreApi {
   placeLimitOrder: (marketId: string, outcomeId: string, side: Side, limitPrice: number, shares: number) => TradeResult
   cancelOrder: (orderId: string) => void
 
-  deposit: (amount: number, method: string) => void
+  depositCrypto: (amount: number, asset: string, network: string) => string // returns tx id (pending until confirmed)
+  confirmDeposit: (txId: string) => void
   withdraw: (amount: number, method: string) => { ok: boolean; error?: string; pending?: boolean; needsKyc?: boolean }
+  setNotificationPrefs: (prefs: User['notificationPrefs']) => void
+
+  addLiquidity: (marketId: string, amount: number) => TradeResult
+  withdrawLiquidity: (lpId: string) => void
+
+  toggleFollow: (userId: string) => void
+  copyPortfolio: (leaderId: string, budget: number) => TradeResult
   submitKyc: (tier: KycTier, docType: string, country: string) => void
   setSelfLimits: (limits: User['selfLimits']) => void
   proposeMarket: (question: string, category: string, source: string) => void
@@ -61,13 +69,14 @@ interface StoreApi {
   // Admin
   adminCreateMarket: (m: {
     question: string; description: string; rules: string; category: string; icon: string
-    type: 'binary' | 'multi'; outcomes: { label: string; p: number }[]
+    type: 'binary' | 'multi' | 'scalar'; outcomes: { label: string; p: number }[]
+    scalarRange?: { min: number; max: number; unit: string }
     closesAt: number; resolutionSource: string; oracle: Market['oracle']
     liquidity: number; feeBps: number; featured: boolean; status: 'draft' | 'active'
   }) => void
   adminSetMarketStatus: (marketId: string, status: MarketStatus, reason?: string) => void
   adminToggleFeatured: (marketId: string) => void
-  adminProposeResolution: (marketId: string, outcomeId: string, side: Side, disputeHours: number) => void
+  adminProposeResolution: (marketId: string, outcomeId: string, side: Side, disputeHours: number, scalarValue?: number) => void
   adminFinalizeResolution: (marketId: string) => void
   adminCancelResolution: (marketId: string) => void
   adminReviewKyc: (requestId: string, approve: boolean, reason?: string) => void
@@ -81,6 +90,8 @@ interface StoreApi {
   adminReviewComplianceAlert: (alertId: string, status: ComplianceAlert['status']) => void
   adminSetAnnouncement: (text: string, kind: 'info' | 'warning' | 'critical') => void
   adminClearAnnouncement: () => void
+  adminCreateApiKey: (label: string, scopes: string[], rateLimitPerMin: number) => void
+  adminRevokeApiKey: (keyId: string) => void
   resetDemo: () => void
 }
 
@@ -132,6 +143,16 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       const h = m.history[o.id] ?? (m.history[o.id] = [])
       h.push({ t: Date.now(), p: price(o) })
       if (h.length > 2000) h.splice(0, h.length - 2000)
+    }
+
+    /** Route a share of the trading fee to the market's liquidity providers. */
+    const distributeLpFees = (draft: AppState, marketId: string, fee: number) => {
+      if (fee <= 0) return
+      const lps = draft.lps.filter(l => l.marketId === marketId)
+      const total = lps.reduce((a, l) => a + l.amount, 0)
+      if (!total) return
+      const pool = fee * (draft.settings.lpFeeShareBps / 10000)
+      for (const l of lps) l.feesEarned += pool * (l.amount / total)
     }
 
     const recordTrade = (draft: AppState, userId: string, m: Market, outcomeId: string, side: Side, direction: Direction, shares: number, px: number) => {
@@ -193,17 +214,29 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         recordTrade(draft, user.id, m, o.id, ord.side, 'buy', filled, q.avgPrice)
         checkAlerts(draft, m)
         draft.txs.unshift({ id: shortId(), userId: user.id, type: 'trade', amount: -actualSpend, status: 'completed', note: `Limit fill: ${filled.toFixed(0)} ${ord.side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
+        // maker rebate: resting orders improve the book, so fills earn a rebate
+        const rebate = actualSpend * (draft.settings.makerRebateBps / 10000)
+        if (rebate > 0.001) {
+          user.balance += rebate
+          draft.txs.unshift({ id: shortId(), userId: user.id, type: 'adjustment', amount: rebate, status: 'completed', note: `Maker rebate (${draft.settings.makerRebateBps}bps) on resting fill`, createdAt: Date.now() })
+        }
       }
     }
 
     const settleMarket = (draft: AppState, m: Market) => {
       for (const pos of draft.positions.filter(p => p.marketId === m.id)) {
         const o = m.outcomes.find(x => x.id === pos.outcomeId)
-        if (!o || !o.resolved) continue
-        const wins = pos.side === o.resolved
-        const payout = wins ? pos.shares : 0
+        if (!o) continue
+        let payout = 0
+        if (m.type === 'scalar' && m.settlementFraction !== undefined) {
+          // scalar: LONG (yes) pays the settled fraction of $1, SHORT (no) the remainder
+          payout = pos.shares * (pos.side === 'yes' ? m.settlementFraction : 1 - m.settlementFraction)
+        } else {
+          if (!o.resolved) continue
+          payout = pos.side === o.resolved ? pos.shares : 0
+        }
         const user = draft.users.find(u => u.id === pos.userId)
-        if (user && payout > 0) {
+        if (user && payout > 0.005) {
           user.balance += payout
           draft.txs.unshift({ id: shortId(), userId: user.id, type: 'settlement', amount: payout, status: 'completed', note: `Settlement: ${m.question.slice(0, 50)}`, createdAt: Date.now() })
         }
@@ -211,6 +244,15 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       }
       draft.positions = draft.positions.filter(p => p.marketId !== m.id)
       draft.orders.forEach(o => { if (o.marketId === m.id && (o.status === 'open' || o.status === 'partial')) o.status = 'cancelled' })
+      // return LP principal + accrued fees
+      for (const lp of draft.lps.filter(l => l.marketId === m.id)) {
+        const user = draft.users.find(u => u.id === lp.userId)
+        if (user) {
+          user.balance += lp.amount + lp.feesEarned
+          draft.txs.unshift({ id: shortId(), userId: user.id, type: 'settlement', amount: lp.amount + lp.feesEarned, status: 'completed', note: `LP principal + fees returned: ${m.question.slice(0, 40)}`, createdAt: Date.now() })
+        }
+      }
+      draft.lps = draft.lps.filter(l => l.marketId !== m.id)
     }
 
     const self: StoreApi = {
@@ -225,16 +267,23 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         return { ok: true }
       },
 
-      signUp: (email, name) => {
+      signUp: (email, name, referralCode) => {
         if (s.users.some(x => x.email.toLowerCase() === email.toLowerCase()))
           return { ok: false, error: 'An account with that email already exists.' }
+        const code = referralCode?.trim().toUpperCase()
+        if (code && !s.users.some(x => x.referralCode === code))
+          return { ok: false, error: 'That referral code was not recognised.' }
         mutate(d => {
+          const handle = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
           const u: User = {
-            id: 'u-' + shortId(), email, name, handle: name.toLowerCase().replace(/[^a-z0-9]+/g, ''),
+            id: 'u-' + shortId(), email, name, handle,
             avatarHue: Math.floor(Math.random() * 360), balance: 100, kycTier: 0, kycStatus: 'none',
             country: 'US', createdAt: Date.now(), isAdmin: false, suspended: false, riskFlags: [],
             selfLimits: { dailyLossCap: null, coolOffUntil: null }, totalDeposited: 0, totalWithdrawn: 0,
             watchlist: [], stats: { profit30d: 0, calibration: 0.5, resolvedCount: 0, winRate: 0, streak: 0 },
+            referralCode: (handle.toUpperCase() + shortId().toUpperCase()).slice(0, 8),
+            referredBy: code || null, referralRewardPaid: false, follows: [],
+            notificationPrefs: { email: true, push: false },
           }
           d.users.push(u)
           d.sessionUserId = u.id
@@ -284,6 +333,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             checkAlerts(d, dm)
             d.txs.unshift({ id: shortId(), userId: du.id, type: 'trade', amount: -amount, status: 'completed', note: `Buy ${q.shares.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
             if (fee > 0) d.txs.unshift({ id: shortId(), userId: du.id, type: 'fee', amount: 0, status: 'completed', note: `Trading fee ${fmtUsd(fee)} included`, createdAt: Date.now() })
+            distributeLpFees(d, marketId, fee)
             const newP = price(dm.outcomes[idx])
             if (d.settings.circuitBreaker.enabled && Math.abs(newP - oldP) * 100 >= d.settings.circuitBreaker.movePct) {
               dm.status = 'halted'
@@ -316,6 +366,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             pushHistory(d, dm, dm.outcomes[idx])
             recordTrade(d, du.id, dm, outcomeId, side, 'sell', amount, q.avgPrice)
             checkAlerts(d, dm)
+            distributeLpFees(d, marketId, q.proceeds * feeRate)
             d.txs.unshift({ id: shortId(), userId: du.id, type: 'trade', amount: net, status: 'completed', note: `Sell ${amount.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
             fillCrossable(d, marketId)
           })
@@ -348,15 +399,128 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         toast('info', 'Order cancelled')
       },
 
-      deposit: (amount, method) => {
-        if (!currentUser) return
+      depositCrypto: (amount, asset, network) => {
+        const txId = shortId()
+        if (!currentUser) return txId
         mutate(d => {
-          const u = d.users.find(x => x.id === currentUser.id)!
-          u.balance += amount
-          u.totalDeposited += amount
-          d.txs.unshift({ id: shortId(), userId: u.id, type: 'deposit', amount, status: 'completed', note: method, createdAt: Date.now() })
+          d.txs.unshift({
+            id: txId, userId: currentUser.id, type: 'deposit', amount, status: 'pending',
+            note: `${asset} on ${network}`, asset, network,
+            txHash: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
+            confirmations: 0, confirmationsNeeded: network === 'Bitcoin' ? 3 : 12,
+            createdAt: Date.now(),
+          })
         })
-        toast('success', `Deposited ${fmtUsd(amount)} via ${method}`)
+        toast('info', `Detected incoming ${asset} on ${network} — waiting for confirmations`)
+        return txId
+      },
+
+      confirmDeposit: (txId) => {
+        mutate(d => {
+          const tx = d.txs.find(x => x.id === txId)
+          if (!tx || tx.status !== 'pending' || tx.type !== 'deposit') return
+          tx.status = 'completed'
+          tx.confirmations = tx.confirmationsNeeded
+          const u = d.users.find(x => x.id === tx.userId)!
+          u.balance += tx.amount
+          u.totalDeposited += tx.amount
+          // referral reward: referrer is paid on the referee's first qualifying confirmed deposit
+          if (d.settings.featureFlags.referrals && u.referredBy && !u.referralRewardPaid && tx.amount >= d.settings.referralMinDeposit) {
+            const referrer = d.users.find(x => x.referralCode === u.referredBy)
+            if (referrer) {
+              u.referralRewardPaid = true
+              referrer.balance += d.settings.referralReward
+              d.txs.unshift({ id: shortId(), userId: referrer.id, type: 'adjustment', amount: d.settings.referralReward, status: 'completed', note: `Referral reward — @${u.handle} made their first deposit`, createdAt: Date.now() })
+            }
+          }
+        })
+        toast('success', 'Deposit confirmed and credited')
+      },
+
+      setNotificationPrefs: (prefs) => {
+        if (!currentUser) return
+        mutate(d => { d.users.find(x => x.id === currentUser.id)!.notificationPrefs = prefs })
+        toast('success', 'Notification preferences saved')
+      },
+
+      addLiquidity: (marketId, amount) => {
+        const u = currentUser
+        const m = marketById(marketId)
+        if (!u || !m) return { ok: false, error: 'Sign in first.' }
+        if (!s.settings.featureFlags.lpProgram) return { ok: false, error: 'The LP program is currently disabled.' }
+        if (m.status !== 'active') return { ok: false, error: `Market is ${m.status}.` }
+        if (amount <= 0 || amount > u.balance) return { ok: false, error: 'Invalid amount.' }
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          const dm = d.markets.find(x => x.id === marketId)!
+          du.balance -= amount
+          for (const o of dm.outcomes) {
+            const p = o.noPool / (o.yesPool + o.noPool)
+            const value = o.yesPool * p + o.noPool * (1 - p)
+            const factor = 1 + (amount / dm.outcomes.length) / Math.max(1, value)
+            o.yesPool *= factor
+            o.noPool *= factor
+          }
+          const existing = d.lps.find(l => l.userId === u.id && l.marketId === marketId)
+          if (existing) existing.amount += amount
+          else d.lps.push({ id: shortId(), userId: u.id, marketId, amount, feesEarned: 0, addedAt: Date.now() })
+          d.txs.unshift({ id: shortId(), userId: u.id, type: 'adjustment', amount: -amount, status: 'completed', note: `LP deposit · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
+        })
+        toast('success', `Providing ${fmtUsd(amount)} of liquidity — you now earn ${(s.settings.lpFeeShareBps / 100).toFixed(0)}% of this market's trading fees pro-rata`)
+        return { ok: true }
+      },
+
+      withdrawLiquidity: (lpId) => {
+        mutate(d => {
+          const lp = d.lps.find(l => l.id === lpId)
+          if (!lp) return
+          const m = d.markets.find(x => x.id === lp.marketId)!
+          const u = d.users.find(x => x.id === lp.userId)!
+          for (const o of m.outcomes) {
+            const p = o.noPool / (o.yesPool + o.noPool)
+            const value = o.yesPool * p + o.noPool * (1 - p)
+            const factor = Math.max(0.05, 1 - (lp.amount / m.outcomes.length) / Math.max(1, value))
+            o.yesPool *= factor
+            o.noPool *= factor
+          }
+          u.balance += lp.amount + lp.feesEarned
+          d.txs.unshift({ id: shortId(), userId: u.id, type: 'adjustment', amount: lp.amount + lp.feesEarned, status: 'completed', note: `LP withdrawal + ${fmtUsd(lp.feesEarned)} fees · ${m.question.slice(0, 35)}`, createdAt: Date.now() })
+          d.lps = d.lps.filter(l => l.id !== lpId)
+        })
+        toast('success', 'Liquidity withdrawn with accrued fees')
+      },
+
+      toggleFollow: (userId) => {
+        const u = currentUser
+        if (!u) { toast('info', 'Sign in to follow traders'); return }
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          du.follows = du.follows.includes(userId) ? du.follows.filter(id => id !== userId) : [...du.follows, userId]
+        })
+      },
+
+      copyPortfolio: (leaderId, budget) => {
+        const u = currentUser
+        if (!u) return { ok: false, error: 'Sign in first.' }
+        if (!s.settings.featureFlags.copyTrading) return { ok: false, error: 'Copy-trading is currently disabled.' }
+        if (budget <= 0 || budget > u.balance) return { ok: false, error: 'Invalid budget.' }
+        const legs = s.positions
+          .filter(p => p.userId === leaderId)
+          .map(p => ({ ...p, market: s.markets.find(m => m.id === p.marketId)! }))
+          .filter(p => p.market.status === 'active')
+        if (!legs.length) return { ok: false, error: 'This trader has no open positions in active markets.' }
+        const totalValue = legs.reduce((a, p) => {
+          const o = p.market.outcomes.find(x => x.id === p.outcomeId)!
+          return a + p.shares * price(o, p.side)
+        }, 0)
+        for (const p of legs) {
+          const o = p.market.outcomes.find(x => x.id === p.outcomeId)!
+          const w = (p.shares * price(o, p.side)) / totalValue
+          const res = self.trade(p.marketId, p.outcomeId, p.side, 'buy', budget * w)
+          if (!res.ok) { toast('error', `Copy stopped: ${res.error}`); return res }
+        }
+        toast('success', `Mirrored ${legs.length} position${legs.length > 1 ? 's' : ''} pro-rata with ${fmtUsd(budget)}`)
+        return { ok: true }
       },
 
       withdraw: (amount, method) => {
@@ -471,6 +635,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             slug: spec.question.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) || 'market-' + i,
             question: spec.question, description: spec.description, rules: spec.rules,
             category: spec.category, tags: [], icon: spec.icon || '🔮', type: spec.type,
+            ...(spec.type === 'scalar' && spec.scalarRange ? { scalarRange: spec.scalarRange } : {}),
             outcomes, createdAt: Date.now(), closesAt: spec.closesAt,
             resolutionSource: spec.resolutionSource, oracle: spec.oracle,
             status: spec.status, volume: 0, feeBps: spec.feeBps, featured: spec.featured,
@@ -499,13 +664,15 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         })
       },
 
-      adminProposeResolution: (marketId, outcomeId, side, disputeHours) => {
+      adminProposeResolution: (marketId, outcomeId, side, disputeHours, scalarValue) => {
         mutate(d => {
           const m = d.markets.find(x => x.id === marketId)!
           m.status = 'resolving'
-          m.proposedResolution = { outcomeId, side, proposedAt: Date.now(), disputeEndsAt: Date.now() + disputeHours * 3600000, by: d.sessionUserId ?? 'system' }
-          const label = m.outcomes.find(o => o.id === outcomeId)?.label
-          audit(d, 'market.resolution-proposed', `"${m.question.slice(0, 50)}" → ${label} ${side.toUpperCase()} (dispute window ${disputeHours}h)`)
+          m.proposedResolution = { outcomeId, side, proposedAt: Date.now(), disputeEndsAt: Date.now() + disputeHours * 3600000, by: d.sessionUserId ?? 'system', scalarValue }
+          const label = m.type === 'scalar'
+            ? `${scalarValue}${m.scalarRange?.unit ?? ''}`
+            : `${m.outcomes.find(o => o.id === outcomeId)?.label} ${side.toUpperCase()}`
+          audit(d, 'market.resolution-proposed', `"${m.question.slice(0, 50)}" → ${label} (dispute window ${disputeHours}h)`)
         })
         toast('info', 'Resolution proposed — dispute window open')
       },
@@ -515,9 +682,15 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           const m = d.markets.find(x => x.id === marketId)!
           const pr = m.proposedResolution
           if (!pr) return
-          for (const o of m.outcomes) {
-            if (m.type === 'multi') o.resolved = o.id === pr.outcomeId ? 'yes' : 'no'
-            else o.resolved = pr.side
+          if (m.type === 'scalar' && m.scalarRange && pr.scalarValue !== undefined) {
+            const { min, max } = m.scalarRange
+            m.settlementFraction = Math.min(1, Math.max(0, (pr.scalarValue - min) / (max - min)))
+            m.outcomes[0].resolved = m.settlementFraction >= 0.5 ? 'yes' : 'no'
+          } else {
+            for (const o of m.outcomes) {
+              if (m.type === 'multi') o.resolved = o.id === pr.outcomeId ? 'yes' : 'no'
+              else o.resolved = pr.side
+            }
           }
           m.status = 'resolved'
           m.resolvedAt = Date.now()
@@ -645,6 +818,26 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           audit(d, 'platform.announce', 'Cleared site banner')
         })
         toast('info', 'Announcement removed')
+      },
+
+      adminCreateApiKey: (label, scopes, rateLimitPerMin) => {
+        mutate(d => {
+          d.apiKeys.unshift({
+            id: shortId(), label, key: 'fsk_live_' + shortId() + shortId().slice(0, 4),
+            scopes, rateLimitPerMin, createdAt: Date.now(), requests30d: 0, lastUsedAt: null, revoked: false,
+          })
+          audit(d, 'api.key-create', `Issued API key "${label}" (${scopes.join(', ')} @ ${rateLimitPerMin}/min)`)
+        })
+        toast('success', 'API key issued')
+      },
+
+      adminRevokeApiKey: (keyId) => {
+        mutate(d => {
+          const k = d.apiKeys.find(x => x.id === keyId)!
+          k.revoked = true
+          audit(d, 'api.key-revoke', `Revoked API key "${k.label}"`)
+        })
+        toast('info', 'API key revoked')
       },
 
       resetDemo: () => {

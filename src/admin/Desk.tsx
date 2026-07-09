@@ -9,8 +9,10 @@ import { BarChart } from '../components/charts'
 // Liquidity desk — pool depth per market, house liquidity injections
 // ---------------------------------------------------------------------------
 export const AdminLiquidity = () => {
-  const { state, adminAddLiquidity } = useStore()
+  const { state, adminAddLiquidity, adminUpdateSettings, userById } = useStore()
   const [amounts, setAmounts] = useState<Record<string, string>>({})
+  const [rebate, setRebate] = useState(String(state.settings.makerRebateBps))
+  const [lpShare, setLpShare] = useState(String(state.settings.lpFeeShareBps / 100))
   const markets = state.markets.filter(m => m.status === 'active' || m.status === 'halted')
   const totalDepth = markets.reduce((a, m) => a + m.outcomes.reduce((b, o) => b + poolValue(o), 0), 0)
   const thin = markets.filter(m => m.outcomes.some(o => poolValue(o) < 25000))
@@ -76,9 +78,62 @@ export const AdminLiquidity = () => {
           </table>
         </div>
       </div>
-      <p className="hint" style={{ marginTop: 10 }}>
-        In production this page also manages external LP programs: rebate tiers for market makers, per-book quoting obligations, and house-capital exposure limits.
-      </p>
+      <div className="grid-2" style={{ marginTop: 14 }}>
+        <div className="card">
+          <div className="card-pad" style={{ fontWeight: 700, borderBottom: '1px solid var(--grid)' }}>
+            External LPs (market-maker program)
+          </div>
+          {state.lps.length ? (
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead><tr><th>Provider</th><th>Market</th><th className="num">Principal</th><th className="num">Fees paid</th></tr></thead>
+                <tbody>
+                  {state.lps.map(l => {
+                    const u = userById(l.userId)
+                    const m = state.markets.find(x => x.id === l.marketId)
+                    return (
+                      <tr key={l.id}>
+                        <td>@{u?.handle}</td>
+                        <td className="muted">{m?.question.slice(0, 34)}…</td>
+                        <td className="num">{fmtUsd(l.amount, 0)}</td>
+                        <td className="num up">{fmtUsd(l.feesEarned)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <Empty icon="🤝" text="No external LPs yet" />}
+        </div>
+
+        <div className="card card-pad stack" style={{ gap: 12 }}>
+          <div style={{ fontWeight: 700 }}>Market-maker incentives</div>
+          <p className="hint">
+            The two levers that attract professional liquidity: a share of every trading fee routed to LPs pro-rata,
+            and a rebate on resting limit-order fills. Both apply platform-wide and take effect immediately.
+          </p>
+          <div className="row-wrap" style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ width: 180 }}>
+              <label>LP fee share (% of each fee)</label>
+              <input className="input" type="number" min={0} max={100} value={lpShare} onChange={e => setLpShare(e.target.value)} />
+            </div>
+            <div className="field" style={{ width: 180 }}>
+              <label>Maker rebate (bps)</label>
+              <input className="input" type="number" min={0} max={100} value={rebate} onChange={e => setRebate(e.target.value)} />
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => adminUpdateSettings({ makerRebateBps: parseFloat(rebate) || 0, lpFeeShareBps: (parseFloat(lpShare) || 0) * 100 })}
+            >
+              Save
+            </button>
+          </div>
+          <div className="hint">
+            Currently: LPs earn {(state.settings.lpFeeShareBps / 100).toFixed(0)}% of every fee · makers rebated {state.settings.makerRebateBps}bps on fills.
+            The public pitch lives at <strong>Exchange → Earn</strong>.
+          </div>
+        </div>
+      </div>
     </>
   )
 }
@@ -203,6 +258,14 @@ export const AdminAnalytics = () => {
     .sort((a, b) => b.stats.profit30d - a.stats.profit30d)
     .slice(0, 5)
 
+  const referrers = state.users
+    .map(u => {
+      const invited = state.users.filter(x => x.referredBy === u.referralCode)
+      return { u, invited: invited.length, converted: invited.filter(x => x.referralRewardPaid).length }
+    })
+    .filter(r => r.invited > 0)
+    .sort((a, b) => b.converted - a.converted)
+
   return (
     <>
       <div className="admin-head"><h1>Analytics</h1><span className="hint">Growth and mix — the inputs for market-making and marketing spend.</span></div>
@@ -230,6 +293,33 @@ export const AdminAnalytics = () => {
               </div>
             ))}
           </div>
+          <div className="card">
+            <div className="card-pad" style={{ fontWeight: 700, borderBottom: '1px solid var(--grid)' }}>
+              Referral program
+              <span className="hint" style={{ fontWeight: 400, marginLeft: 8 }}>
+                {fmtUsd(state.settings.referralReward, 0)} per conversion · min first deposit {fmtUsd(state.settings.referralMinDeposit, 0)}
+              </span>
+            </div>
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead><tr><th>Referrer</th><th>Code</th><th className="num">Invited</th><th className="num">Converted</th><th className="num">Paid out</th></tr></thead>
+                <tbody>
+                  {referrers.length ? referrers.map(r => (
+                    <tr key={r.u.id}>
+                      <td><div className="row" style={{ gap: 8 }}><Avatar user={r.u} size={24} />@{r.u.handle}</div></td>
+                      <td><code style={{ fontSize: 12 }}>{r.u.referralCode}</code></td>
+                      <td className="num">{r.invited}</td>
+                      <td className="num">{r.converted}</td>
+                      <td className="num">{fmtUsd(r.converted * state.settings.referralReward, 0)}</td>
+                    </tr>
+                  )) : <tr><td colSpan={5} className="muted">No referral activity yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid-2">
           <div className="card">
             <div className="card-pad" style={{ fontWeight: 700, borderBottom: '1px solid var(--grid)' }}>Top traders (30d P&L)</div>
             <div className="tbl-wrap">

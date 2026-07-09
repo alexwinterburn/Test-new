@@ -154,6 +154,16 @@ const specs: MarketSpec[] = [
     vol: 421870, liq: 45000, outcomes: [{ label: 'Yes', p: 0.44 }],
   },
   {
+    q: 'What will US CPI year-over-year be for December 2026?',
+    desc: 'Scalar market: settles proportionally across the 0%–6% range based on the BLS December 2026 CPI-U print.',
+    rules: 'Settlement value = BLS CPI-U 12-month unadjusted change for December 2026, first print, clamped to [0%, 6%]. LONG shares pay the settled fraction of $1; SHORT shares pay the remainder. Example: a 3.0% print settles LONG at 50¢.',
+    cat: 'Economics', tags: ['cpi', 'scalar'], icon: '🎯', closesDays: 180,
+    source: 'bls.gov', oracle: 'external', featured: true,
+    vol: 684200, liq: 90000, type: 'scalar',
+    scalarRange: { min: 0, max: 6, unit: '%' },
+    outcomes: [{ label: 'Forecast', p: 0.47 }],
+  },
+  {
     q: 'Did global EV sales exceed 20M units in 2025?',
     desc: 'Resolved example market: worldwide battery-electric + plug-in hybrid sales for calendar 2025.',
     rules: 'Resolves YES if the IEA Global EV Outlook 2026 reports combined BEV+PHEV sales above 20 million for 2025.',
@@ -174,6 +184,11 @@ const mkUser = (
   totalDeposited: balance * 1.4, totalWithdrawn: 0,
   watchlist: [],
   stats: { profit30d: 0, calibration: 0.5, resolvedCount: 0, winRate: 0, streak: 0 },
+  referralCode: handle.toUpperCase().slice(0, 8),
+  referredBy: null,
+  referralRewardPaid: false,
+  follows: [],
+  notificationPrefs: { email: true, push: false },
   ...extras,
 })
 
@@ -197,6 +212,7 @@ export const buildSeed = (): AppState => {
       slug: s.q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60),
       question: s.q, description: s.desc, rules: s.rules, category: s.cat, tags: s.tags,
       icon: s.icon, type: s.type ?? 'binary', outcomes,
+      ...(s.scalarRange ? { scalarRange: s.scalarRange } : {}),
       createdAt: t - (60 + Math.floor(rng() * 30)) * DAY,
       closesAt: t + s.closesDays * DAY,
       resolutionSource: s.source, oracle: s.oracle,
@@ -220,6 +236,7 @@ export const buildSeed = (): AppState => {
     }),
     mkUser('u-marcus', 'marcus@example.com', 'Marcus Lee', 'mlee', 30, 512.75, 1, 'approved', 'SG', false, {
       stats: { profit30d: 214.4, calibration: 0.79, resolvedCount: 18, winRate: 0.56, streak: 3 },
+      referredBy: 'DANAPRED', referralRewardPaid: true,
     }),
     mkUser('u-priya', 'priya@example.com', 'Priya Sharma', 'priyafx', 320, 7311.2, 1, 'approved', 'IN', false, {
       riskFlags: ['velocity: 14 trades/hr on 2026-07-02'],
@@ -230,6 +247,7 @@ export const buildSeed = (): AppState => {
     }),
     mkUser('u-sam', 'sam@example.com', 'Sam Carter', 'samc', 10, 1204.9, 0, 'none', 'US', false, {
       stats: { profit30d: 508.9, calibration: 0.83, resolvedCount: 22, winRate: 0.59, streak: 5 },
+      referredBy: 'DANAPRED', referralRewardPaid: true, follows: ['u-dana'],
     }),
   ]
 
@@ -248,12 +266,12 @@ export const buildSeed = (): AppState => {
   ]
 
   const txs = [
-    { id: 'tx-1', userId: 'u-demo', type: 'deposit' as const, amount: 3000, status: 'completed' as const, note: 'Card •••• 4242', createdAt: t - 40 * DAY },
+    { id: 'tx-1', userId: 'u-demo', type: 'deposit' as const, amount: 3000, status: 'completed' as const, note: 'USDC on Base', asset: 'USDC', network: 'Base', txHash: '0x8f3a…c21b', confirmations: 12, confirmationsNeeded: 12, createdAt: t - 40 * DAY },
     { id: 'tx-2', userId: 'u-demo', type: 'trade' as const, amount: -99, status: 'completed' as const, note: 'Buy 180 YES @ 55¢ · Fed rate cut', createdAt: t - 33 * DAY },
     { id: 'tx-3', userId: 'u-demo', type: 'trade' as const, amount: -124.8, status: 'completed' as const, note: 'Buy 240 NO @ 52¢ · BTC $150k', createdAt: t - 20 * DAY },
-    { id: 'tx-4', userId: 'u-dana', type: 'withdrawal' as const, amount: -5000, status: 'pending' as const, note: 'Bank transfer — pending review', createdAt: t - 0.3 * DAY },
-    { id: 'tx-5', userId: 'u-priya', type: 'deposit' as const, amount: 2000, status: 'completed' as const, note: 'USDC on Base', createdAt: t - 3 * DAY },
-    { id: 'tx-6', userId: 'u-marcus', type: 'withdrawal' as const, amount: -250, status: 'completed' as const, note: 'Bank transfer', createdAt: t - 9 * DAY },
+    { id: 'tx-4', userId: 'u-dana', type: 'withdrawal' as const, amount: -5000, status: 'pending' as const, note: 'USDC on Ethereum — pending review', asset: 'USDC', network: 'Ethereum', createdAt: t - 0.3 * DAY },
+    { id: 'tx-5', userId: 'u-priya', type: 'deposit' as const, amount: 2000, status: 'completed' as const, note: 'USDC on Base', asset: 'USDC', network: 'Base', txHash: '0x2b91…77de', confirmations: 12, confirmationsNeeded: 12, createdAt: t - 3 * DAY },
+    { id: 'tx-6', userId: 'u-marcus', type: 'withdrawal' as const, amount: -250, status: 'completed' as const, note: 'USDT on Tron', asset: 'USDT', network: 'Tron', txHash: 'TXk4…9mQd', createdAt: t - 9 * DAY },
     { id: 'tx-7', userId: 'u-demo', type: 'settlement' as const, amount: 62.4, status: 'completed' as const, note: 'EV sales 2025 — resolved YES', createdAt: t - 12 * DAY },
   ]
 
@@ -301,6 +319,19 @@ export const buildSeed = (): AppState => {
     { id: 'ca-4', userId: 'u-marcus', kind: 'chargeback' as const, severity: 'serious' as const, status: 'acknowledged' as const, detail: 'Card issuer inquiry on $250 deposit (resolved in user’s favour 2026-06-28).', at: t - 11 * DAY },
   ]
 
+  // Liquidity-provider positions (the market-maker program)
+  const lps = [
+    { id: 'lp-1', userId: 'u-dana', marketId: 'm-0', amount: 40000, feesEarned: 612.4, addedAt: t - 45 * DAY },
+    { id: 'lp-2', userId: 'u-dana', marketId: 'm-1', amount: 60000, feesEarned: 1104.8, addedAt: t - 40 * DAY },
+    { id: 'lp-3', userId: 'u-marcus', marketId: 'm-5', amount: 5000, feesEarned: 88.1, addedAt: t - 20 * DAY },
+  ]
+
+  const apiKeys = [
+    { id: 'ak-1', label: 'Polling desk — newsroom widget', key: 'fsk_live_9f2ab6c41e8d', scopes: ['read:markets', 'read:prices'], rateLimitPerMin: 120, createdAt: t - 30 * DAY, requests30d: 184220, lastUsedAt: t - 0.02 * DAY, revoked: false },
+    { id: 'ak-2', label: 'Quant fund — market data', key: 'fsk_live_51c0de77aa19', scopes: ['read:markets', 'read:prices', 'read:trades'], rateLimitPerMin: 600, createdAt: t - 18 * DAY, requests30d: 951804, lastUsedAt: t - 0.001 * DAY, revoked: false },
+    { id: 'ak-3', label: 'Deprecated test key', key: 'fsk_live_0000dead0000', scopes: ['read:markets'], rateLimitPerMin: 60, createdAt: t - 80 * DAY, requests30d: 0, lastUsedAt: t - 55 * DAY, revoked: true },
+  ]
+
   // 30 days of platform metrics for the admin dashboard
   const dailyVolume = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(t - (29 - i) * DAY)
@@ -314,13 +345,17 @@ export const buildSeed = (): AppState => {
   })
 
   return {
-    version: 4,
+    version: 5,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
-    trades, complianceAlerts, alerts: [], slip: [],
+    trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys,
     settings: {
       tradingFeeBps: 100,
       withdrawalFeeFlat: 0,
+      makerRebateBps: 20,
+      lpFeeShareBps: 6000, // 60% of every trading fee goes to that market's LPs
+      referralReward: 25,
+      referralMinDeposit: 50,
       tierTradeCaps: { 0: 500, 1: 10000, 2: 1e12 }, // >= 1e12 renders as "Unlimited"
       withdrawalAutoApproveUnder: 1000,
       withdrawalDailyCap: { 1: 2500, 2: 50000 },
@@ -331,8 +366,12 @@ export const buildSeed = (): AppState => {
         aiResolutionAssist: true,
         limitOrders: true,
         leaderboard: true,
-        scalarMarkets: false,
-        negRiskBundles: false,
+        scalarMarkets: true,
+        negRiskBundles: true,
+        copyTrading: true,
+        referrals: true,
+        lpProgram: true,
+        publicApi: true,
       },
       dailyVolume,
       announcement: null,

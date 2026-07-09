@@ -38,7 +38,8 @@ export interface Market {
   oracle: OracleType
   status: MarketStatus
   haltReason?: string
-  proposedResolution?: { outcomeId: string; side: Side; proposedAt: number; disputeEndsAt: number; by: string }
+  proposedResolution?: { outcomeId: string; side: Side; proposedAt: number; disputeEndsAt: number; by: string; scalarValue?: number }
+  settlementFraction?: number // scalar markets: 0..1 of the range at resolution
   resolvedAt?: number
   volume: number
   feeBps: number
@@ -83,6 +84,33 @@ export interface Tx {
   status: TxStatus
   note: string
   createdAt: number
+  // crypto rails (deposits/withdrawals)
+  asset?: string
+  network?: string
+  txHash?: string
+  confirmations?: number
+  confirmationsNeeded?: number
+}
+
+export interface LpPosition {
+  id: string
+  userId: string
+  marketId: string
+  amount: number // principal provided
+  feesEarned: number
+  addedAt: number
+}
+
+export interface ApiKey {
+  id: string
+  label: string
+  key: string // public demo key, e.g. fsk_live_xxx
+  scopes: string[]
+  rateLimitPerMin: number
+  createdAt: number
+  requests30d: number
+  lastUsedAt: number | null
+  revoked: boolean
 }
 
 export interface KycRequest {
@@ -118,6 +146,11 @@ export interface User {
   watchlist: string[] // market ids
   // Forecasting stats for the leaderboard (seeded; recomputed server-side in prod)
   stats: { profit30d: number; calibration: number; resolvedCount: number; winRate: number; streak: number }
+  referralCode: string
+  referredBy: string | null // referral code used at signup
+  referralRewardPaid: boolean
+  follows: string[] // user ids this account follows (copy-trading)
+  notificationPrefs: { email: boolean; push: boolean }
 }
 
 export interface TradeEvent {
@@ -182,6 +215,10 @@ export interface MarketProposal {
 export interface Settings {
   tradingFeeBps: number
   withdrawalFeeFlat: number
+  makerRebateBps: number // credited on resting limit-order fills
+  lpFeeShareBps: number // share of each trading fee routed to that market's LPs (bps of the fee)
+  referralReward: number // $ credited to referrer on referee's first confirmed deposit
+  referralMinDeposit: number
   // KYC gating: max cumulative trade notional per tier ($). Withdrawals need tier >= 1.
   tierTradeCaps: { 0: number; 1: number; 2: number }
   withdrawalAutoApproveUnder: number
@@ -195,6 +232,10 @@ export interface Settings {
     leaderboard: boolean
     scalarMarkets: boolean
     negRiskBundles: boolean
+    copyTrading: boolean
+    referrals: boolean
+    lpProgram: boolean
+    publicApi: boolean
   }
   dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
   announcement: { text: string; kind: 'info' | 'warning' | 'critical'; at: number } | null
@@ -215,5 +256,7 @@ export interface AppState {
   alerts: PriceAlert[]
   complianceAlerts: ComplianceAlert[]
   slip: SlipLeg[]
+  lps: LpPosition[]
+  apiKeys: ApiKey[]
   settings: Settings
 }

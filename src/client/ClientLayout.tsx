@@ -32,6 +32,9 @@ export const ClientLayout = () => {
             {state.settings.featureFlags.leaderboard && (
               <NavLink to="/leaderboard" className={({ isActive }) => (isActive ? 'on' : '')}>Leaderboard</NavLink>
             )}
+            {state.settings.featureFlags.lpProgram && (
+              <NavLink to="/earn" className={({ isActive }) => (isActive ? 'on' : '')}>Earn</NavLink>
+            )}
             <NavLink to="/wallet" className={({ isActive }) => (isActive ? 'on' : '')}>Wallet</NavLink>
           </nav>
           <div className="nav-search">

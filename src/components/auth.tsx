@@ -8,17 +8,18 @@ import type { KycTier } from '../lib/types'
 // Sign in / sign up — deliberately frictionless: email only, no KYC up front.
 // ---------------------------------------------------------------------------
 export const AuthModal = ({ onClose, initialMode = 'signup' }: { onClose: () => void; initialMode?: 'signin' | 'signup' }) => {
-  const { signIn, signUp } = useStore()
+  const { signIn, signUp, state } = useStore()
   const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
+  const [referral, setReferral] = useState('')
   const [error, setError] = useState('')
 
   const submit = () => {
     setError('')
     if (!/.+@.+\..+/.test(email)) { setError('Enter a valid email address.'); return }
     if (mode === 'signup' && name.trim().length < 2) { setError('Enter your name.'); return }
-    const res = mode === 'signin' ? signIn(email) : signUp(email, name.trim())
+    const res = mode === 'signin' ? signIn(email) : signUp(email, name.trim(), referral)
     if (!res.ok) { setError(res.error ?? 'Something went wrong'); return }
     onClose()
   }
@@ -40,6 +41,13 @@ export const AuthModal = ({ onClose, initialMode = 'signup' }: { onClose: () => 
         <label>Email</label>
         <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e => e.key === 'Enter' && submit()} />
       </div>
+      {mode === 'signup' && state.settings.featureFlags.referrals && (
+        <div className="field">
+          <label>Referral code (optional)</label>
+          <input className="input" value={referral} onChange={e => setReferral(e.target.value)} placeholder="e.g. DANAPRED" />
+          <span className="hint">Your friend earns a reward on your first deposit — you both look clever.</span>
+        </div>
+      )}
       {error && <div style={{ color: 'var(--critical)', fontSize: 13 }}>{error}</div>}
       <button className="btn btn-primary btn-lg" onClick={submit}>
         {mode === 'signup' ? 'Create account' : 'Sign in'}

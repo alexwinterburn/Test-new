@@ -55,6 +55,7 @@ export const AdminLayout = () => {
         <Item to="/admin/compliance" icon="🛡️" label="Compliance" count={complianceOpen} />
         <div className="grp">Platform</div>
         <Item to="/admin/analytics" icon="📈" label="Analytics" />
+        <Item to="/admin/api" icon="🔑" label="API & widgets" />
         <Item to="/admin/announce" icon="📣" label="Announcements" />
         <Item to="/admin/flags" icon="🚩" label="Feature flags" />
         <Item to="/admin/audit" icon="📜" label="Audit log" />

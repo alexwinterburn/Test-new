@@ -17,8 +17,11 @@ export const MarketCreate = () => {
   const [rules, setRules] = useState('')
   const [category, setCategory] = useState('Politics')
   const [icon, setIcon] = useState('🔮')
-  const [type, setType] = useState<'binary' | 'multi'>('binary')
+  const [type, setType] = useState<'binary' | 'multi' | 'scalar'>('binary')
   const [outcomes, setOutcomes] = useState<{ label: string; p: number }[]>([{ label: 'Yes', p: 0.5 }])
+  const [scalarMin, setScalarMin] = useState('0')
+  const [scalarMax, setScalarMax] = useState('100')
+  const [scalarUnit, setScalarUnit] = useState('%')
   const [closesDays, setClosesDays] = useState('90')
   const [source, setSource] = useState('')
   const [oracle, setOracle] = useState<OracleType>('admin')
@@ -28,7 +31,7 @@ export const MarketCreate = () => {
 
   const stepValid = [
     question.trim().length >= 10 && rules.trim().length >= 10,
-    type === 'binary' || (outcomes.length >= 2 && outcomes.every(o => o.label.trim())),
+    type !== 'multi' || (outcomes.length >= 2 && outcomes.every(o => o.label.trim())),
     source.trim().length >= 3,
     parseFloat(liquidity) >= 500,
   ][step]
@@ -39,10 +42,13 @@ export const MarketCreate = () => {
   const create = (status: 'draft' | 'active') => {
     const finalOutcomes = type === 'binary'
       ? [{ label: 'Yes', p: outcomes[0].p }]
-      : outcomes
+      : type === 'scalar'
+        ? [{ label: 'Forecast', p: outcomes[0].p }]
+        : outcomes
     adminCreateMarket({
       question: question.trim(), description: description.trim() || question.trim(), rules: rules.trim(),
       category, icon, type, outcomes: finalOutcomes,
+      ...(type === 'scalar' ? { scalarRange: { min: parseFloat(scalarMin) || 0, max: parseFloat(scalarMax) || 100, unit: scalarUnit } } : {}),
       closesAt: Date.now() + (parseFloat(closesDays) || 30) * 86400000,
       resolutionSource: source.trim(), oracle,
       liquidity: parseFloat(liquidity) || 1000, feeBps: parseFloat(feeBps) || 100,
@@ -102,12 +108,39 @@ export const MarketCreate = () => {
               <div className="row">
                 <button className={'btn' + (type === 'binary' ? ' btn-primary' : '')} onClick={() => { setType('binary'); setOutcomes([{ label: 'Yes', p: outcomes[0]?.p ?? 0.5 }]) }}>Binary (Yes/No)</button>
                 <button className={'btn' + (type === 'multi' ? ' btn-primary' : '')} onClick={() => { setType('multi'); if (outcomes.length < 2) setOutcomes([{ label: '', p: 0.5 }, { label: '', p: 0.5 }]) }}>Multi-outcome</button>
-                <button className="btn" disabled title={state.settings.featureFlags.scalarMarkets ? '' : 'Enable in Feature flags'}>Scalar (range) — {state.settings.featureFlags.scalarMarkets ? 'beta' : 'flag off'}</button>
+                <button
+                  className={'btn' + (type === 'scalar' ? ' btn-primary' : '')}
+                  disabled={!state.settings.featureFlags.scalarMarkets}
+                  title={state.settings.featureFlags.scalarMarkets ? 'Settles proportionally across a numeric range' : 'Enable in Feature flags'}
+                  onClick={() => { setType('scalar'); setOutcomes([{ label: 'Forecast', p: outcomes[0]?.p ?? 0.5 }]) }}
+                >
+                  Scalar (range)
+                </button>
               </div>
             </div>
-            {type === 'binary' ? (
+            {type === 'scalar' && (
+              <div className="grid-3">
+                <div className="field">
+                  <label>Range min</label>
+                  <input className="input" type="number" value={scalarMin} onChange={e => setScalarMin(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Range max</label>
+                  <input className="input" type="number" value={scalarMax} onChange={e => setScalarMax(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Unit</label>
+                  <input className="input" value={scalarUnit} onChange={e => setScalarUnit(e.target.value)} placeholder="%, $, °C…" />
+                </div>
+              </div>
+            )}
+            {type !== 'multi' ? (
               <div className="field">
-                <label>Initial probability: {Math.round(outcomes[0].p * 100)}%</label>
+                <label>
+                  {type === 'scalar'
+                    ? `Initial market forecast: ${((parseFloat(scalarMin) || 0) + (outcomes[0].p * ((parseFloat(scalarMax) || 100) - (parseFloat(scalarMin) || 0)))).toFixed(1)}${scalarUnit}`
+                    : `Initial probability: ${Math.round(outcomes[0].p * 100)}%`}
+                </label>
                 <input type="range" min={5} max={95} value={outcomes[0].p * 100} onChange={e => setOutcome(0, { p: parseFloat(e.target.value) / 100 })} />
                 <span className="hint">Where the AMM opens. Get this close to consensus to avoid gifting early traders an edge.</span>
               </div>

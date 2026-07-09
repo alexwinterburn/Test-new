@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
 import { price } from '../lib/engine'
 import { fmtPct, fmtUsd } from '../lib/format'
-import { Avatar, Empty, Tabs } from '../components/ui'
+import { Avatar, Empty, Modal, Tabs } from '../components/ui'
+import type { User } from '../lib/types'
 
 type SortKey = 'profit' | 'calibration'
 
 export const Leaderboard = () => {
-  const { state, currentUser } = useStore()
+  const { state, currentUser, toggleFollow } = useStore()
   const [sort, setSort] = useState<SortKey>('profit')
+  const [copying, setCopying] = useState<User | null>(null)
 
   const rows = useMemo(() => {
     const traders = state.users.filter(u => !u.isAdmin && !u.suspended)
@@ -65,7 +67,7 @@ export const Leaderboard = () => {
         <div className="tbl-wrap">
           <table className="tbl">
             <thead>
-              <tr><th style={{ width: 40 }}>#</th><th>Trader</th><th className="num">P&L (30d)</th><th className="num">Calibration</th><th className="num">Win rate</th><th className="num">Resolved</th><th className="num">Streak</th></tr>
+              <tr><th style={{ width: 40 }}>#</th><th>Trader</th><th className="num">P&L (30d)</th><th className="num">Calibration</th><th className="num">Win rate</th><th className="num">Resolved</th><th className="num">Streak</th>{state.settings.featureFlags.copyTrading && <th style={{ width: 150 }} />}</tr>
             </thead>
             <tbody>
               {rows.map((u, i) => (
@@ -90,6 +92,22 @@ export const Leaderboard = () => {
                   <td className="num">{fmtPct(u.stats.winRate)}</td>
                   <td className="num">{u.stats.resolvedCount}</td>
                   <td className="num">{u.stats.streak > 0 ? `🔥 ${u.stats.streak}` : u.stats.streak < 0 ? `❄️ ${-u.stats.streak}` : '—'}</td>
+                  {state.settings.featureFlags.copyTrading && (
+                    <td>
+                      {u.id !== currentUser?.id && (
+                        <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                          <button
+                            className="btn btn-sm"
+                            style={currentUser?.follows.includes(u.id) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+                            onClick={() => toggleFollow(u.id)}
+                          >
+                            {currentUser?.follows.includes(u.id) ? '✓ Following' : 'Follow'}
+                          </button>
+                          <button className="btn btn-sm btn-primary" onClick={() => setCopying(u)}>Copy</button>
+                        </div>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -99,6 +117,53 @@ export const Leaderboard = () => {
       <p className="hint" style={{ marginTop: 10 }}>
         Calibration scores make Foresight a credibility engine, not just a casino: analysts and journalists can cite “top-decile calibrated forecasters,” which neither raw P&L nor follower counts can offer.
       </p>
+      {copying && <CopyModal leader={copying} onClose={() => setCopying(null)} />}
     </main>
+  )
+}
+
+const CopyModal = ({ leader, onClose }: { leader: User; onClose: () => void }) => {
+  const { state, copyPortfolio, currentUser } = useStore()
+  const [budget, setBudget] = useState('100')
+  const [error, setError] = useState('')
+  const legs = state.positions.filter(p => p.userId === leader.id)
+    .map(p => ({ ...p, market: state.markets.find(m => m.id === p.marketId)! }))
+    .filter(p => p.market.status === 'active')
+
+  return (
+    <Modal title={`Copy @${leader.handle}'s portfolio`} onClose={onClose}>
+      <p className="hint">
+        Mirrors their current open positions pro-rata with your budget, at today's prices. One-time copy — production adds
+        continuous auto-mirroring with per-follower risk caps and a fee share for the leader.
+      </p>
+      <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+        {legs.length ? legs.map(p => {
+          const o = p.market.outcomes.find(x => x.id === p.outcomeId)!
+          return (
+            <div key={p.id} className="row" style={{ fontSize: 13, justifyContent: 'space-between', padding: '3px 0' }}>
+              <span>{p.market.icon} {p.market.question.slice(0, 42)}…</span>
+              <strong style={{ color: p.side === 'yes' ? 'var(--yes)' : 'var(--no)' }}>{p.side.toUpperCase()}{p.market.type === 'multi' ? ` · ${o.label.slice(0, 16)}` : ''}</strong>
+            </div>
+          )
+        }) : <div className="hint">No open positions in active markets right now.</div>}
+      </div>
+      <div className="field">
+        <label>Budget to allocate ($)</label>
+        <input className="input" type="number" min={1} value={budget} onChange={e => setBudget(e.target.value)} />
+        {currentUser && <span className="hint">Balance: {fmtUsd(currentUser.balance)}</span>}
+      </div>
+      {error && <div style={{ color: 'var(--critical)', fontSize: 13 }}>{error}</div>}
+      <button
+        className="btn btn-primary btn-lg"
+        disabled={!legs.length}
+        onClick={() => {
+          const res = copyPortfolio(leader.id, parseFloat(budget) || 0)
+          if (res.ok) onClose()
+          else setError(res.error ?? 'Copy failed')
+        }}
+      >
+        Mirror {legs.length} position{legs.length === 1 ? '' : 's'} now
+      </button>
+    </Modal>
   )
 }

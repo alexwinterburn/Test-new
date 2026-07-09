@@ -12,7 +12,10 @@ import { MarketCreate } from './admin/MarketCreate'
 import { AdminKyc, AdminUsers } from './admin/Users'
 import { AdminAudit, AdminFinance, AdminFlags, AdminProposals, AdminRisk } from './admin/Ops'
 import { AdminAnalytics, AdminAnnounce, AdminCompliance, AdminLiquidity } from './admin/Desk'
+import { AdminApi } from './admin/Api'
 import { Leaderboard } from './client/Leaderboard'
+import { Earn } from './client/Earn'
+import { Embed } from './client/Embed'
 
 export const App = () => (
   <StoreProvider>
@@ -23,8 +26,10 @@ export const App = () => (
           <Route path="/market/:id" element={<MarketDetail />} />
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/earn" element={<Earn />} />
           <Route path="/wallet" element={<Wallet />} />
         </Route>
+        <Route path="/embed/:id" element={<Embed />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="markets" element={<AdminMarkets />} />
@@ -38,6 +43,7 @@ export const App = () => (
           <Route path="compliance" element={<AdminCompliance />} />
           <Route path="analytics" element={<AdminAnalytics />} />
           <Route path="announce" element={<AdminAnnounce />} />
+          <Route path="api" element={<AdminApi />} />
           <Route path="flags" element={<AdminFlags />} />
           <Route path="audit" element={<AdminAudit />} />
         </Route>

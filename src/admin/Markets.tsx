@@ -108,7 +108,7 @@ export const AdminMarkets = () => {
         <ResolveModal
           market={resolving}
           onClose={() => setResolving(null)}
-          onPropose={(outcomeId, side, hours) => { adminProposeResolution(resolving.id, outcomeId, side, hours); setResolving(null) }}
+          onPropose={(outcomeId, side, hours, scalarValue) => { adminProposeResolution(resolving.id, outcomeId, side, hours, scalarValue); setResolving(null) }}
         />
       )}
     </>
@@ -118,13 +118,15 @@ export const AdminMarkets = () => {
 const ResolveModal = ({ market, onClose, onPropose }: {
   market: Market
   onClose: () => void
-  onPropose: (outcomeId: string, side: Side, hours: number) => void
+  onPropose: (outcomeId: string, side: Side, hours: number, scalarValue?: number) => void
 }) => {
   const { state } = useStore()
   const isMulti = market.type === 'multi'
+  const isScalar = market.type === 'scalar' && !!market.scalarRange
   const [outcomeId, setOutcomeId] = useState(market.outcomes[0].id)
   const [side, setSide] = useState<Side>('yes')
   const [hours, setHours] = useState('24')
+  const [scalarValue, setScalarValue] = useState(String(market.scalarRange ? (market.scalarRange.min + market.scalarRange.max) / 2 : 0))
   const aiOn = state.settings.featureFlags.aiResolutionAssist
 
   return (
@@ -141,7 +143,15 @@ const ResolveModal = ({ market, onClose, onPropose }: {
         </div>
       )}
 
-      {isMulti ? (
+      {isScalar ? (
+        <div className="field">
+          <label>Settlement value ({market.scalarRange!.min}–{market.scalarRange!.max}{market.scalarRange!.unit})</label>
+          <input className="input" type="number" value={scalarValue} onChange={e => setScalarValue(e.target.value)} />
+          <span className="hint">
+            Longs pay {Math.round(Math.min(1, Math.max(0, ((parseFloat(scalarValue) || 0) - market.scalarRange!.min) / (market.scalarRange!.max - market.scalarRange!.min))) * 100)}¢ per share at this value; shorts the remainder.
+          </span>
+        </div>
+      ) : isMulti ? (
         <div className="field">
           <label>Winning outcome</label>
           <select className="select" value={outcomeId} onChange={e => setOutcomeId(e.target.value)}>
@@ -166,7 +176,7 @@ const ResolveModal = ({ market, onClose, onPropose }: {
         <span className="hint">During the window, traders can post a dispute bond to escalate to the resolution committee.</span>
       </div>
 
-      <button className="btn btn-primary btn-lg" onClick={() => onPropose(outcomeId, isMulti ? 'yes' : side, parseFloat(hours))}>
+      <button className="btn btn-primary btn-lg" onClick={() => onPropose(outcomeId, isMulti || isScalar ? 'yes' : side, parseFloat(hours), isScalar ? parseFloat(scalarValue) || 0 : undefined)}>
         Propose resolution
       </button>
       <div className="hint">Settlement pays $1.00 per winning share and cancels open orders. This is reversible until “Finalize & settle”.</div>

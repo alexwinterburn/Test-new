@@ -163,8 +163,12 @@ const FLAG_META: Record<keyof Settings['featureFlags'], { label: string; desc: s
   aiResolutionAssist: { label: 'AI resolution assist', desc: 'An agent drafts resolution memos with citations from the market’s source; humans countersign. Memos are published for audit.' },
   limitOrders: { label: 'Limit orders', desc: 'Resting orders that fill when the AMM price crosses the limit. Off = market orders only.' },
   leaderboard: { label: 'Leaderboards', desc: 'Public trader rankings by P&L and calibration score (Brier). Drives the social loop.' },
-  scalarMarkets: { label: 'Scalar markets (beta)', desc: 'Range markets that settle proportionally between bounds — e.g. “CPI YoY in June”. Unlocks the wizard option.' },
-  negRiskBundles: { label: 'Neg-risk bundles (beta)', desc: 'Trade a full multi-outcome book as one collateral-efficient bundle, like Polymarket’s neg-risk — but exposed as a one-click “hedge the field” button.' },
+  scalarMarkets: { label: 'Scalar markets', desc: 'Range markets that settle proportionally between bounds — e.g. “CPI YoY in December”. Unlocks the wizard option.' },
+  negRiskBundles: { label: 'Neg-risk bundles', desc: 'One-click “hedge the field” on multi-outcome markets: buy NO on every other outcome via the combo slip.' },
+  copyTrading: { label: 'Copy-trading', desc: 'Follow top-calibrated forecasters and mirror their portfolios pro-rata from the leaderboard.' },
+  referrals: { label: 'Referral program', desc: 'Invite codes with a cash reward on the referee’s first qualifying deposit. Reward size set in code (settings.referralReward).' },
+  lpProgram: { label: 'LP program (Earn)', desc: 'Anyone can provide liquidity and earn a share of trading fees; the public pitch lives at Exchange → Earn.' },
+  publicApi: { label: 'Public read API', desc: 'Read-only market data API plus the embeddable live-odds widget. Keys managed under API & widgets.' },
 }
 
 export const AdminFlags = () => {

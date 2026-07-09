@@ -45,6 +45,24 @@ npm run build   # type-check + production build
 - **Market intelligence panel** — per-market activity feed, top holders (with
   their calibration scores, so you can see if smart money agrees with you), and a
   simulated AI brief: momentum, source watch, base rates, and order-flow signals.
+- **Crypto-only funding** — per-asset deposit addresses (USDC/USDT/BTC/ETH/SOL
+  across Base, Ethereum, Tron, Bitcoin, Solana) with simulated on-chain
+  confirmations before crediting; withdrawals to an address, still KYC-gated.
+- **Referral program** — every account has an invite code; the referrer is paid
+  automatically on the referee's first qualifying confirmed deposit. Stats on the
+  wallet page; program overview in admin Analytics.
+- **Earn (LP program)** — anyone can provide liquidity to any book and earn a
+  configurable share of that market's trading fees pro-rata (plus a maker rebate
+  on resting limit-order fills). Principal + accrued fees are returned
+  automatically at resolution. This page is the market-maker recruiting pitch.
+- **Copy-trading** — follow leaderboard traders and mirror their open portfolio
+  pro-rata with a chosen budget.
+- **Scalar markets** — numeric-range markets (e.g. CPI YoY) that settle
+  proportionally: longs get the settled fraction of $1, shorts the remainder.
+- **Neg-risk “Hedge the field”** — one click adds NO on every other outcome of a
+  multi-outcome market to your combo slip.
+- **Embeddable widget** — `/embed/:id` is a chrome-less live-odds card for
+  articles and newsletters, with copy-paste iframe code on every market page.
 
 ### Control Tower (`/admin`)
 - **Dashboard** — volume/trades/signups KPIs, 30-day volume chart, custodial balances,
@@ -62,7 +80,11 @@ npm run build   # type-check + production build
 - **Risk controls** — circuit breaker (auto-halts a market on an outsized single-trade
   move), per-tier position caps, per-tier withdrawal caps, geo-blocking.
 - **Liquidity desk** — pool depth and cost-to-move per market, thin-book flags,
-  one-click house liquidity injections that deepen books without moving price.
+  one-click house liquidity injections that deepen books without moving price,
+  an external-LP roster with fees paid out, and the two market-maker levers
+  (LP fee share %, maker rebate bps) editable in place.
+- **API & widgets** — issue/revoke read-API keys with scopes and per-key rate
+  limits, usage counters, and the public endpoint catalogue.
 - **Compliance center** — AML alert queue (trade velocity, deposit structuring,
   sanctions screening, chargebacks) with acknowledge/dismiss workflow, active
   cool-off monitoring, and a one-click CSV export for regulators.

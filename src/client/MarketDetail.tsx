@@ -4,7 +4,7 @@ import { useStore } from '../lib/store'
 import { price, quoteBuy, quoteSell } from '../lib/engine'
 import { fmtAgo, fmtCents, fmtCountdown, fmtDate, fmtPct, fmtPct1, fmtUsd, fmtUsdCompact } from '../lib/format'
 import { PriceChart } from '../components/charts'
-import { Avatar, StatusBadge, Tabs, Empty } from '../components/ui'
+import { Avatar, Modal, StatusBadge, Tabs, Empty } from '../components/ui'
 import { KycModal } from '../components/auth'
 import type { Market, Side } from '../lib/types'
 
@@ -32,10 +32,14 @@ export const MarketDetail = () => {
   const [alertCond, setAlertCond] = useState<'above' | 'below'>('above')
   const [alertPct, setAlertPct] = useState('70')
   const [intel, setIntel] = useState<'activity' | 'holders' | 'brief'>('activity')
+  const [embedOpen, setEmbedOpen] = useState(false)
 
   if (!m) return <main className="page-inner"><Empty icon="🤷" text="Market not found" /></main>
 
   const isMulti = m.type === 'multi'
+  const isScalar = m.type === 'scalar' && !!m.scalarRange
+  const impliedValue = (prob: number) => m.scalarRange!.min + prob * (m.scalarRange!.max - m.scalarRange!.min)
+  const sideLabel = (sd: Side) => (isScalar ? (sd === 'yes' ? 'LONG' : 'SHORT') : sd.toUpperCase())
   const selOutcome = m.outcomes.find(o => o.id === outcomeId) ?? m.outcomes[0]
   const p = price(selOutcome)
   const sidePrice = side === 'yes' ? p : 1 - p
@@ -93,6 +97,7 @@ export const MarketDetail = () => {
             {m.creator !== 'foresight' && <span className="badge badge-accent"><span className="dot" />Community market</span>}
           </div>
         </div>
+        <button className="btn btn-sm" onClick={() => setEmbedOpen(true)} title="Embed this market">{'</>'} Embed</button>
         <button
           className="btn btn-sm"
           style={{ fontSize: 16, color: currentUser?.watchlist.includes(m.id) ? 'var(--warning)' : 'var(--ink-3)' }}
@@ -119,10 +124,9 @@ export const MarketDetail = () => {
       {m.status === 'resolved' && (
         <div className="card card-pad" style={{ borderColor: 'var(--good)', marginBottom: 14 }}>
           <strong>Resolved:</strong>{' '}
-          {isMulti
-            ? m.outcomes.find(o => o.resolved === 'yes')?.label
-            : (m.outcomes[0].resolved === 'yes' ? 'YES' : 'NO')}
-          {' '}· winning shares paid $1.00 each.
+          {isScalar && m.settlementFraction !== undefined
+            ? `settled at ${impliedValue(m.settlementFraction).toFixed(2)}${m.scalarRange!.unit} — longs paid ${Math.round(m.settlementFraction * 100)}¢, shorts ${Math.round((1 - m.settlementFraction) * 100)}¢ per share.`
+            : <>{isMulti ? m.outcomes.find(o => o.resolved === 'yes')?.label : (m.outcomes[0].resolved === 'yes' ? 'YES' : 'NO')} · winning shares paid $1.00 each.</>}
         </div>
       )}
 
@@ -131,13 +135,16 @@ export const MarketDetail = () => {
           <div className="card card-pad">
             {!isMulti && (
               <div className="big-prob">
-                <span className="v" style={{ color: 'var(--series-1)' }}>{fmtPct(p)}</span>
-                <span className="muted">chance</span>
+                <span className="v" style={{ color: 'var(--series-1)' }}>
+                  {isScalar ? impliedValue(p).toFixed(1) + m.scalarRange!.unit : fmtPct(p)}
+                </span>
+                <span className="muted">{isScalar ? 'market forecast' : 'chance'}</span>
                 {dayAgo && (
                   <span className={'d ' + (delta >= 0 ? 'up' : 'down')}>
-                    {delta >= 0 ? '▲' : '▼'} {fmtPct1(Math.abs(delta))} today
+                    {delta >= 0 ? '▲' : '▼'} {isScalar ? (Math.abs(delta) * (m.scalarRange!.max - m.scalarRange!.min)).toFixed(2) + m.scalarRange!.unit : fmtPct1(Math.abs(delta))} today
                   </span>
                 )}
+                {isScalar && <span className="badge badge-accent" style={{ marginLeft: 'auto' }}><span className="dot" />Scalar · range {m.scalarRange!.min}–{m.scalarRange!.max}{m.scalarRange!.unit}</span>}
               </div>
             )}
             <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 4, gap: 10 }}>
@@ -193,6 +200,19 @@ export const MarketDetail = () => {
                           >
                             No {Math.round((1 - op) * 100)}¢
                           </button>
+                          {state.settings.featureFlags.negRiskBundles && m.outcomes.length > 2 && (
+                            <button
+                              className="btn btn-sm btn-ghost"
+                              title={`Back "${o.label}" by buying NO on every other outcome — one click, added to your slip`}
+                              onClick={() => {
+                                const others = m.outcomes.filter(x => x.id !== o.id)
+                                const per = Math.max(5, Math.round((amt || 30) / others.length))
+                                others.forEach(x => addToSlip({ marketId: m.id, outcomeId: x.id, side: 'no', amount: per }))
+                              }}
+                            >
+                              🛡️ Hedge the field
+                            </button>
+                          )}
                         </span>
                       )}
                     </div>
@@ -290,12 +310,18 @@ export const MarketDetail = () => {
 
             <div className="side-toggle">
               <button className={side === 'yes' ? 'on-yes' : ''} onClick={() => setSide('yes')}>
-                Yes <span className="pr">{Math.round(p * 100)}¢</span>
+                {isScalar ? 'Long' : 'Yes'} <span className="pr">{Math.round(p * 100)}¢</span>
               </button>
               <button className={side === 'no' ? 'on-no' : ''} onClick={() => setSide('no')}>
-                No <span className="pr">{Math.round((1 - p) * 100)}¢</span>
+                {isScalar ? 'Short' : 'No'} <span className="pr">{Math.round((1 - p) * 100)}¢</span>
               </button>
             </div>
+            {isScalar && (
+              <div className="hint">
+                Long pays more the higher the settled value; short pays more the lower. A settle at {impliedValue(p).toFixed(1)}{m.scalarRange!.unit} pays
+                longs {Math.round(p * 100)}¢/share.
+              </div>
+            )}
 
             {mode === 'buy' && orderType === 'limit' ? (
               <>
@@ -335,7 +361,7 @@ export const MarketDetail = () => {
                     <>
                       <div><span className="k">Avg price</span><span className="v">{fmtCents(buyQuote.avgPrice)}</span></div>
                       <div><span className="k">Shares</span><span className="v">{buyQuote.shares.toFixed(2)}</span></div>
-                      <div><span className="k">Payout if {side.toUpperCase()}</span><span className="v up">{fmtUsd(buyQuote.shares)} ({amt > 0 ? '+' + fmtPct1((buyQuote.shares - amt) / amt) : ''})</span></div>
+                      <div><span className="k">{isScalar ? 'Max payout' : `Payout if ${sideLabel(side)}`}</span><span className="v up">{fmtUsd(buyQuote.shares)} ({amt > 0 ? '+' + fmtPct1((buyQuote.shares - amt) / amt) : ''})</span></div>
                       <div><span className="k">Price impact</span><span className="v">{fmtPct1(Math.abs(buyQuote.priceImpact))}</span></div>
                       <div><span className="k">Fee ({(state.settings.tradingFeeBps / 100).toFixed(2)}%)</span><span className="v">{fmtUsd(amt * feeRate)}</span></div>
                     </>
@@ -359,9 +385,9 @@ export const MarketDetail = () => {
             >
               {!currentUser ? 'Sign up to trade'
                 : m.status !== 'active' ? 'Trading unavailable'
-                : mode === 'sell' ? `Sell ${side.toUpperCase()}`
+                : mode === 'sell' ? `Sell ${sideLabel(side)}`
                 : orderType === 'limit' ? 'Place limit order'
-                : `Buy ${side.toUpperCase()}`}
+                : `Buy ${sideLabel(side)}`}
             </button>
             {mode === 'buy' && orderType === 'market' && m.status === 'active' && (
               <button className="btn" onClick={() => addToSlip({ marketId: m.id, outcomeId: selOutcome.id, side, amount: amt > 0 ? amt : 10 })}>
@@ -402,7 +428,33 @@ export const MarketDetail = () => {
       </div>
 
       {kycReason && <KycModal reason={kycReason} onClose={() => setKycReason(null)} />}
+      {embedOpen && <EmbedModal marketId={m.id} onClose={() => setEmbedOpen(false)} />}
     </main>
+  )
+}
+
+const EmbedModal = ({ marketId, onClose }: { marketId: string; onClose: () => void }) => {
+  const { toast } = useStore()
+  const url = `${location.origin}${location.pathname}#/embed/${marketId}`
+  const snippet = `<iframe src="${url}" width="640" height="440" style="border:0;border-radius:12px" title="Foresight market"></iframe>`
+  return (
+    <Modal title="Embed this market" onClose={onClose}>
+      <p className="hint">
+        A live, self-updating odds widget for articles, newsletters and dashboards — the distribution loop that puts your markets
+        where the readers are. Read-only; clicks come back here to trade.
+      </p>
+      <div className="field">
+        <label>Preview</label>
+        <a href={url} target="_blank" rel="noreferrer" className="btn">Open widget in a new tab ↗</a>
+      </div>
+      <div className="field">
+        <label>Embed code</label>
+        <textarea className="input" rows={3} readOnly value={snippet} onFocus={e => e.currentTarget.select()} />
+      </div>
+      <button className="btn btn-primary btn-lg" onClick={() => { navigator.clipboard?.writeText(snippet); toast('success', 'Embed code copied') }}>
+        Copy embed code
+      </button>
+    </Modal>
   )
 }
 

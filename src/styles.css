@@ -388,5 +388,7 @@ table.tbl th.num { text-align: right; }
 .ai-brief { display: flex; flex-direction: column; gap: 10px; }
 .ai-brief .sig { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--surface-2); border-radius: 9px; font-size: 13px; }
 .ai-brief .sig .conf { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
-.progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; position: relative; }
 .progress > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.progress > i.indet { position: absolute; animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { 0% { left: -60%; } 100% { left: 100%; } }
