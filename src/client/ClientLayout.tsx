@@ -3,8 +3,9 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { Avatar, KycBadge, ThemeToggle, Toasts } from '../components/ui'
 import { AuthModal, KycModal } from '../components/auth'
-import { AlertsBell, SlipDrawer } from './extras'
+import { NotificationsBell, SlipDrawer } from './extras'
 import { fmtUsd } from '../lib/format'
+import { levelForXp } from '../lib/gamification'
 
 export const ClientLayout = () => {
   const { currentUser, signOut, state } = useStore()
@@ -52,10 +53,15 @@ export const ClientLayout = () => {
             <button className="btn btn-ghost btn-sm" style={{ position: 'relative' }} onClick={() => setSlipOpen(o => !o)} aria-label="Combo slip">
               🧾{state.slip.length > 0 && <span className="bell-dot">{state.slip.length}</span>}
             </button>
-            <AlertsBell />
+            <NotificationsBell />
             <ThemeToggle />
             {currentUser ? (
               <>
+                {state.settings.featureFlags.gamification && (
+                  <Link to="/portfolio" className="badge badge-accent" title={`${currentUser.xp.toLocaleString()} XP · ${currentUser.loginStreak}-day streak`}>
+                    <span className="dot" />Lv {levelForXp(currentUser.xp)}{currentUser.loginStreak >= 3 ? ` · 🔥${currentUser.loginStreak}` : ''}
+                  </Link>
+                )}
                 <Link to="/wallet" className="balance-chip">
                   <span className="v mono">{fmtUsd(currentUser.balance)}</span>
                   <span className="l">Balance</span>

@@ -13,6 +13,7 @@ import { AdminKyc, AdminUsers } from './admin/Users'
 import { AdminAudit, AdminFinance, AdminFlags, AdminProposals, AdminRisk } from './admin/Ops'
 import { AdminAnalytics, AdminAnnounce, AdminCompliance, AdminLiquidity } from './admin/Desk'
 import { AdminApi } from './admin/Api'
+import { AdminComms, AdminData } from './admin/Comms'
 import { Leaderboard } from './client/Leaderboard'
 import { Earn } from './client/Earn'
 import { Embed } from './client/Embed'
@@ -44,6 +45,8 @@ export const App = () => (
           <Route path="analytics" element={<AdminAnalytics />} />
           <Route path="announce" element={<AdminAnnounce />} />
           <Route path="api" element={<AdminApi />} />
+          <Route path="comms" element={<AdminComms />} />
+          <Route path="data" element={<AdminData />} />
           <Route path="flags" element={<AdminFlags />} />
           <Route path="audit" element={<AdminAudit />} />
         </Route>

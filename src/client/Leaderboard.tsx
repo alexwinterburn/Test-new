@@ -123,9 +123,11 @@ export const Leaderboard = () => {
 }
 
 const CopyModal = ({ leader, onClose }: { leader: User; onClose: () => void }) => {
-  const { state, copyPortfolio, currentUser } = useStore()
+  const { state, copyPortfolio, currentUser, createCopyLink, cancelCopyLink } = useStore()
   const [budget, setBudget] = useState('100')
+  const [cap, setCap] = useState('25')
   const [error, setError] = useState('')
+  const activeLink = currentUser ? state.copyLinks.find(l => l.followerId === currentUser.id && l.leaderId === leader.id && l.active) : null
   const legs = state.positions.filter(p => p.userId === leader.id)
     .map(p => ({ ...p, market: state.markets.find(m => m.id === p.marketId)! }))
     .filter(p => p.market.status === 'active')
@@ -133,8 +135,8 @@ const CopyModal = ({ leader, onClose }: { leader: User; onClose: () => void }) =
   return (
     <Modal title={`Copy @${leader.handle}'s portfolio`} onClose={onClose}>
       <p className="hint">
-        Mirrors their current open positions pro-rata with your budget, at today's prices. One-time copy — production adds
-        continuous auto-mirroring with per-follower risk caps and a fee share for the leader.
+        One-time copy mirrors their current open positions pro-rata with your budget. Or start an auto-mirror below to copy
+        every future trade they make, capped per trade.
       </p>
       <div className="card card-pad" style={{ background: 'var(--surface-2)' }}>
         {legs.length ? legs.map(p => {
@@ -164,6 +166,29 @@ const CopyModal = ({ leader, onClose }: { leader: User; onClose: () => void }) =
       >
         Mirror {legs.length} position{legs.length === 1 ? '' : 's'} now
       </button>
+
+      <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>🪞 Auto-mirror future trades</div>
+        {activeLink ? (
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="hint">Active — up to {fmtUsd(activeLink.perTradeCap, 0)} per trade · {fmtUsd(activeLink.mirrored, 0)} mirrored so far.</span>
+            <button className="btn btn-sm btn-danger" onClick={() => { cancelCopyLink(activeLink.id); onClose() }}>Stop</button>
+          </div>
+        ) : (
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ width: 150 }}>
+              <label>Per-trade cap ($)</label>
+              <input className="input" type="number" min={1} value={cap} onChange={e => setCap(e.target.value)} />
+            </div>
+            <button className="btn" onClick={() => { createCopyLink(leader.id, parseFloat(cap) || 25); onClose() }}>
+              Start auto-mirror
+            </button>
+          </div>
+        )}
+        <div className="hint" style={{ marginTop: 6 }}>
+          Every future buy @{leader.handle} makes is copied to your account instantly, capped per trade. Production adds a leader fee share on mirrored profits.
+        </div>
+      </div>
     </Modal>
   )
 }

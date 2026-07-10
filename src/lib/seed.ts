@@ -189,6 +189,11 @@ const mkUser = (
   referralRewardPaid: false,
   follows: [],
   notificationPrefs: { email: true, push: false },
+  xp: 0,
+  achievements: [],
+  loginStreak: 1,
+  lastLoginDay: new Date().toISOString().slice(0, 10),
+  lastTradeAt: null,
   ...extras,
 })
 
@@ -229,14 +234,17 @@ export const buildSeed = (): AppState => {
     mkUser('u-demo', 'alex.winterburn@gmail.com', 'Alex Winterburn', 'alexw', 210, 2450.0, 0, 'none', 'GB', false, {
       totalDeposited: 3000, watchlist: ['m-0', 'm-2', 'm-3'],
       stats: { profit30d: 76.8, calibration: 0.71, resolvedCount: 4, winRate: 0.5, streak: 2 },
+      xp: 620, achievements: ['first-trade', 'prophet'], loginStreak: 4, lastTradeAt: now() - 20 * DAY,
     }),
     mkUser('u-dana', 'dana@example.com', 'Dana Okafor', 'danapredicts', 150, 18240.5, 2, 'approved', 'NG', false, {
       totalDeposited: 40000, totalWithdrawn: 12000,
       stats: { profit30d: 4830.2, calibration: 0.88, resolvedCount: 62, winRate: 0.64, streak: 7 },
+      xp: 4850, achievements: ['first-trade', 'whale', 'market-maker', 'prophet', 'social', 'streak-7', 'diversified'], loginStreak: 23, lastTradeAt: now() - 0.4 * DAY,
     }),
     mkUser('u-marcus', 'marcus@example.com', 'Marcus Lee', 'mlee', 30, 512.75, 1, 'approved', 'SG', false, {
       stats: { profit30d: 214.4, calibration: 0.79, resolvedCount: 18, winRate: 0.56, streak: 3 },
       referredBy: 'DANAPRED', referralRewardPaid: true,
+      xp: 1140, achievements: ['first-trade', 'market-maker', 'scout'], loginStreak: 2, lastTradeAt: now() - 9 * DAY,
     }),
     mkUser('u-priya', 'priya@example.com', 'Priya Sharma', 'priyafx', 320, 7311.2, 1, 'approved', 'IN', false, {
       riskFlags: ['velocity: 14 trades/hr on 2026-07-02'],
@@ -344,11 +352,20 @@ export const buildSeed = (): AppState => {
     }
   })
 
+  const notifications = [
+    { id: 'n-1', userId: 'u-demo', kind: 'settlement' as const, title: 'Market settled', text: 'EV sales 2025 resolved YES — $62.40 credited.', link: '#/portfolio', read: true, at: t - 12 * DAY },
+    { id: 'n-2', userId: 'u-demo', kind: 'watchlist-move' as const, title: 'Watchlist mover', text: 'Fed rate cut market moved 4pts in the last day.', link: '#/market/m-0', read: false, at: t - 0.6 * DAY },
+  ]
+
+  const copyLinks = [
+    { id: 'cl-1', followerId: 'u-sam', leaderId: 'u-dana', perTradeCap: 25, active: true, createdAt: t - 15 * DAY, mirrored: 340 },
+  ]
+
   return {
-    version: 5,
+    version: 6,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
-    trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys,
+    trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys, notifications, copyLinks,
     settings: {
       tradingFeeBps: 100,
       withdrawalFeeFlat: 0,
@@ -372,7 +389,24 @@ export const buildSeed = (): AppState => {
         referrals: true,
         lpProgram: true,
         publicApi: true,
+        gamification: true,
       },
+      autoNotify: {
+        kycReminders: true,
+        tradeReminders: true,
+        watchlistMovers: true,
+        closingSoon: true,
+        inactivityDays: 7,
+        moveThresholdPts: 5,
+      },
+      savedReports: [
+        { id: 'rep-1', name: 'Weekly growth snapshot', metrics: ['volume', 'signups'], rangeDays: 7, createdAt: t - 10 * DAY },
+        { id: 'rep-2', name: 'Monthly board pack', metrics: ['volume', 'trades', 'signups', 'fees'], rangeDays: 30, createdAt: t - 25 * DAY },
+      ],
+      webhooks: [
+        { id: 'wh-1', url: 'https://newsroom.example.com/hooks/foresight', events: ['market.resolved', 'market.created'], active: true, deliveries30d: 84 },
+        { id: 'wh-2', url: 'https://quantfund.example.com/ingest', events: ['trade.executed', 'market.halted', 'market.resolved'], active: true, deliveries30d: 51203 },
+      ],
       dailyVolume,
       announcement: null,
     },

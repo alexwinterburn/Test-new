@@ -240,11 +240,41 @@ export const AdminCompliance = () => {
 }
 
 // ---------------------------------------------------------------------------
-// Analytics — growth & category mix
+// Analytics — growth & category mix + personalisable report builder
 // ---------------------------------------------------------------------------
+const METRICS: { id: string; label: string; fmt: (n: number) => string }[] = [
+  { id: 'volume', label: 'Volume', fmt: fmtUsdCompact },
+  { id: 'trades', label: 'Trades', fmt: n => Math.round(n).toLocaleString() },
+  { id: 'signups', label: 'Signups', fmt: n => Math.round(n).toLocaleString() },
+  { id: 'fees', label: 'Fee income', fmt: fmtUsdCompact },
+]
+
 export const AdminAnalytics = () => {
-  const { state } = useStore()
+  const { state, adminSaveReport, adminDeleteReport, toast } = useStore()
   const dv = state.settings.dailyVolume
+  const [selMetrics, setSelMetrics] = useState<string[]>(['volume', 'signups'])
+  const [rangeDays, setRangeDays] = useState(30)
+  const [reportName, setReportName] = useState('')
+
+  const feeRate = state.settings.tradingFeeBps / 10000
+  const rows = dv.slice(-rangeDays).map(d => ({
+    date: d.date, volume: d.volume, trades: d.trades, signups: d.signups, fees: d.volume * feeRate,
+  }))
+  const metricSeries = (id: string) => rows.map(r => ({ label: r.date.slice(5), value: (r as unknown as Record<string, number>)[id] }))
+  const total = (id: string) => rows.reduce((a, r) => a + (r as unknown as Record<string, number>)[id], 0)
+
+  const exportReportCsv = () => {
+    const header = ['date', ...selMetrics]
+    const lines = [header.join(','), ...rows.map(r => header.map(h => (r as unknown as Record<string, unknown>)[h]).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    el.download = `foresight-report-${rangeDays}d.csv`
+    el.click()
+    URL.revokeObjectURL(url)
+    toast('success', 'Report CSV downloaded')
+  }
 
   const byCategory = state.markets.reduce<Record<string, number>>((acc, m) => {
     acc[m.category] = (acc[m.category] ?? 0) + m.volume
@@ -270,6 +300,67 @@ export const AdminAnalytics = () => {
     <>
       <div className="admin-head"><h1>Analytics</h1><span className="hint">Growth and mix — the inputs for market-making and marketing spend.</span></div>
       <div className="stack">
+        <div className="card card-pad stack" style={{ gap: 12 }}>
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ fontWeight: 700 }}>📑 Report builder <span className="hint" style={{ fontWeight: 400 }}>— compose, save and export the views you care about</span></div>
+            <div className="row">
+              <button className="btn btn-sm" onClick={exportReportCsv}>⬇ Export CSV</button>
+            </div>
+          </div>
+          <div className="row-wrap" style={{ gap: 14 }}>
+            <div className="row" style={{ gap: 10 }}>
+              {METRICS.map(mt => (
+                <label key={mt.id} className="row" style={{ gap: 5, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={selMetrics.includes(mt.id)}
+                    onChange={e => setSelMetrics(ms => (e.target.checked ? [...ms, mt.id] : ms.filter(x => x !== mt.id)))}
+                  />
+                  {mt.label}
+                </label>
+              ))}
+            </div>
+            <div className="tabs" style={{ marginLeft: 'auto' }}>
+              {[7, 14, 30].map(d => (
+                <button key={d} className={rangeDays === d ? 'on' : ''} onClick={() => setRangeDays(d)}>{d}d</button>
+              ))}
+            </div>
+          </div>
+          <div className="grid-2">
+            {selMetrics.map(id => {
+              const mt = METRICS.find(x => x.id === id)!
+              return (
+                <div key={id} className="card card-pad" style={{ background: 'var(--surface-2)' }}>
+                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+                    <strong style={{ fontSize: 13 }}>{mt.label} — last {rangeDays}d</strong>
+                    <span className="mono" style={{ fontWeight: 700 }}>{mt.fmt(total(id))} total</span>
+                  </div>
+                  <BarChart data={metricSeries(id)} height={130} format={mt.fmt} />
+                </div>
+              )
+            })}
+          </div>
+          <div className="row-wrap" style={{ alignItems: 'flex-end', borderTop: '1px solid var(--grid)', paddingTop: 10 }}>
+            <div className="field" style={{ width: 240 }}>
+              <label>Save this view as</label>
+              <input className="input" value={reportName} onChange={e => setReportName(e.target.value)} placeholder="e.g. Monday growth review" />
+            </div>
+            <button className="btn btn-primary" disabled={reportName.trim().length < 3 || !selMetrics.length} onClick={() => { adminSaveReport(reportName.trim(), selMetrics, rangeDays); setReportName('') }}>
+              Save report
+            </button>
+            <div className="row-wrap" style={{ marginLeft: 'auto', gap: 6 }}>
+              {state.settings.savedReports.map(r => (
+                <span key={r.id} className="badge" style={{ textTransform: 'none', padding: '5px 10px', cursor: 'pointer' }}>
+                  <button onClick={() => { setSelMetrics(r.metrics); setRangeDays(r.rangeDays); toast('info', `Loaded "${r.name}"`) }} style={{ fontWeight: 700 }}>
+                    {r.name}
+                  </button>
+                  <button onClick={() => adminDeleteReport(r.id)} style={{ color: 'var(--critical)', marginLeft: 4 }} aria-label={`Delete ${r.name}`}>✕</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="grid-2">
           <div className="card card-pad">
             <div style={{ fontWeight: 700, marginBottom: 8 }}>Signups per day — last 30 days</div>

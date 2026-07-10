@@ -56,7 +56,9 @@ export const AdminLayout = () => {
         <div className="grp">Platform</div>
         <Item to="/admin/analytics" icon="📈" label="Analytics" />
         <Item to="/admin/api" icon="🔑" label="API & widgets" />
+        <Item to="/admin/comms" icon="✉️" label="Comms & notifs" />
         <Item to="/admin/announce" icon="📣" label="Announcements" />
+        <Item to="/admin/data" icon="🗄️" label="Data studio" />
         <Item to="/admin/flags" icon="🚩" label="Feature flags" />
         <Item to="/admin/audit" icon="📜" label="Audit log" />
         <div style={{ marginTop: 'auto', padding: '14px 11px', display: 'flex', alignItems: 'center', gap: 8 }}>

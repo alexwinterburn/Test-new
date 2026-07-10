@@ -151,6 +151,12 @@ export interface User {
   referralRewardPaid: boolean
   follows: string[] // user ids this account follows (copy-trading)
   notificationPrefs: { email: boolean; push: boolean }
+  // gamification
+  xp: number
+  achievements: string[] // achievement ids
+  loginStreak: number
+  lastLoginDay: string // YYYY-MM-DD
+  lastTradeAt: number | null
 }
 
 export interface TradeEvent {
@@ -170,10 +176,45 @@ export interface PriceAlert {
   userId: string
   marketId: string
   outcomeId: string
-  condition: 'above' | 'below'
-  threshold: number // probability 0..1
+  // above/below an absolute probability, or any 24h move of >= threshold pts
+  condition: 'above' | 'below' | 'move'
+  threshold: number // probability 0..1 (for 'move': the move size, e.g. 0.05)
   createdAt: number
   triggeredAt?: number
+}
+
+export type NotificationKind =
+  | 'price-alert' | 'settlement' | 'kyc' | 'withdrawal' | 'reward'
+  | 'reminder-kyc' | 'reminder-trade' | 'watchlist-move' | 'closing-soon'
+  | 'achievement' | 'level-up' | 'admin-message' | 'copy-trade'
+
+export interface AppNotification {
+  id: string
+  userId: string
+  kind: NotificationKind
+  title: string
+  text: string
+  link?: string // hash route
+  read: boolean
+  at: number
+}
+
+export interface SavedReport {
+  id: string
+  name: string
+  metrics: string[] // metric ids from the report builder
+  rangeDays: number
+  createdAt: number
+}
+
+export interface CopyLink {
+  id: string
+  followerId: string
+  leaderId: string
+  perTradeCap: number // $ mirrored per leader trade
+  active: boolean
+  createdAt: number
+  mirrored: number // total $ mirrored so far
 }
 
 export interface SlipLeg {
@@ -236,7 +277,18 @@ export interface Settings {
     referrals: boolean
     lpProgram: boolean
     publicApi: boolean
+    gamification: boolean
   }
+  autoNotify: {
+    kycReminders: boolean
+    tradeReminders: boolean
+    watchlistMovers: boolean
+    closingSoon: boolean
+    inactivityDays: number // trade reminder after N days without trading
+    moveThresholdPts: number // watchlist mover threshold, in probability points
+  }
+  webhooks: { id: string; url: string; events: string[]; active: boolean; deliveries30d: number }[]
+  savedReports: SavedReport[]
   dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
   announcement: { text: string; kind: 'info' | 'warning' | 'critical'; at: number } | null
 }
@@ -258,5 +310,7 @@ export interface AppState {
   slip: SlipLeg[]
   lps: LpPosition[]
   apiKeys: ApiKey[]
+  notifications: AppNotification[]
+  copyLinks: CopyLink[]
   settings: Settings
 }

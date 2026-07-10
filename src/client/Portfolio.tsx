@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import { price } from '../lib/engine'
 import { fmtCents, fmtDateTime, fmtUsd } from '../lib/format'
 import { Empty, Tabs } from '../components/ui'
+import { ACHIEVEMENTS, levelProgress } from '../lib/gamification'
 
 export const Portfolio = () => {
   const { state, currentUser, cancelOrder } = useStore()
@@ -55,6 +56,33 @@ export const Portfolio = () => {
         </div>
         <div className="card kpi"><div className="l">Open orders</div><div className="v mono">{data.orders.length}</div></div>
       </div>
+
+      {state.settings.featureFlags.gamification && (
+        <div className="card card-pad" style={{ marginBottom: 18 }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontWeight: 700 }}>🏅 Forecaster progress</div>
+            <span className="hint mono">Level {levelProgress(currentUser.xp).level} · {currentUser.xp.toLocaleString()} XP · 🔥 {currentUser.loginStreak}-day streak</span>
+          </div>
+          <div className="progress" style={{ marginBottom: 12 }}>
+            <i style={{ width: `${Math.min(100, (levelProgress(currentUser.xp).into / levelProgress(currentUser.xp).needed) * 100)}%` }} />
+          </div>
+          <div className="row-wrap" style={{ gap: 8 }}>
+            {ACHIEVEMENTS.map(a => {
+              const earned = currentUser.achievements.includes(a.id)
+              return (
+                <span
+                  key={a.id}
+                  className="badge"
+                  title={`${a.desc} (+${a.xp} XP)`}
+                  style={{ padding: '6px 12px', textTransform: 'none', fontSize: 12, opacity: earned ? 1 : 0.45, ...(earned ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
+                >
+                  {a.icon} {a.name}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {Object.keys(byCategory).length > 1 && (
         <div className="card card-pad" style={{ marginBottom: 18 }}>

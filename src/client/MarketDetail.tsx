@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
-import { price, quoteBuy, quoteSell } from '../lib/engine'
+import { costToMove, price, quoteBuy, quoteSell } from '../lib/engine'
 import { fmtAgo, fmtCents, fmtCountdown, fmtDate, fmtPct, fmtPct1, fmtUsd, fmtUsdCompact } from '../lib/format'
 import { PriceChart } from '../components/charts'
 import { Avatar, Modal, StatusBadge, Tabs, Empty } from '../components/ui'
@@ -29,10 +29,15 @@ export const MarketDetail = () => {
   const [range, setRange] = useState('1M')
   const [kycReason, setKycReason] = useState<string | null>(null)
   const [alertOpen, setAlertOpen] = useState(false)
-  const [alertCond, setAlertCond] = useState<'above' | 'below'>('above')
+  const [alertCond, setAlertCond] = useState<'above' | 'below' | 'move'>('above')
   const [alertPct, setAlertPct] = useState('70')
   const [intel, setIntel] = useState<'activity' | 'holders' | 'brief'>('activity')
   const [embedOpen, setEmbedOpen] = useState(false)
+
+  // route param changes without remounting — reset per-market UI state
+  useEffect(() => {
+    setOutcomeId(null); setSide('yes'); setMode('buy'); setOrderType('market'); setAmount('25'); setAlertOpen(false); setIntel('activity')
+  }, [id])
 
   if (!m) return <main className="page-inner"><Empty icon="🤷" text="Market not found" /></main>
 
@@ -158,12 +163,13 @@ export const MarketDetail = () => {
             {alertOpen && (
               <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8, gap: 8, fontSize: 13 }}>
                 <span className="muted">Notify me when {isMulti ? selOutcome.label : 'YES'} goes</span>
-                <select className="select" style={{ width: 90, padding: '5px 8px' }} value={alertCond} onChange={e => setAlertCond(e.target.value as 'above' | 'below')}>
+                <select className="select" style={{ width: 130, padding: '5px 8px' }} value={alertCond} onChange={e => setAlertCond(e.target.value as 'above' | 'below' | 'move')}>
                   <option value="above">above</option>
                   <option value="below">below</option>
+                  <option value="move">moves by (24h)</option>
                 </select>
                 <input className="input" style={{ width: 70, padding: '5px 8px' }} type="number" min={1} max={99} value={alertPct} onChange={e => setAlertPct(e.target.value)} />
-                <span className="muted">%</span>
+                <span className="muted">{alertCond === 'move' ? 'pts' : '%'}</span>
                 <button className="btn btn-sm btn-primary" onClick={() => { createAlert(m.id, selOutcome.id, alertCond, (parseFloat(alertPct) || 50) / 100); setAlertOpen(false) }}>Set</button>
               </div>
             )}
@@ -408,7 +414,7 @@ export const MarketDetail = () => {
           <div className="card card-pad">
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Market depth (AMM)</div>
             <div className="orderbook-row"><span className="muted">Liquidity pool</span><strong className="mono">{fmtUsdCompact(selOutcome.yesPool * price(selOutcome) + selOutcome.noPool * (1 - price(selOutcome)))}</strong></div>
-            <div className="orderbook-row"><span className="muted">Move to {Math.min(99, Math.round(p * 100) + 5)}¢ costs</span><strong className="mono">{fmtUsdCompact(estimateCostToMove(selOutcome, 0.05))}</strong></div>
+            <div className="orderbook-row"><span className="muted">Move to {Math.min(99, Math.round(p * 100) + 5)}¢ costs</span><strong className="mono">{fmtUsdCompact(costToMove(selOutcome, 0.05))}</strong></div>
             <div className="orderbook-row"><span className="muted">Open limit orders</span><strong className="mono">{state.orders.filter(o => o.marketId === m.id && (o.status === 'open' || o.status === 'partial')).length}</strong></div>
           </div>
         </div>
@@ -542,19 +548,4 @@ const AiBrief = ({ m, delta, p }: { m: Market; delta: number; p: number }) => {
       </div>
     </div>
   )
-}
-
-// rough binary search: dollars to push YES price up by `dp`
-const estimateCostToMove = (o: { yesPool: number; noPool: number }, dp: number): number => {
-  const target = Math.min(0.99, o.noPool / (o.yesPool + o.noPool) + dp)
-  let lo = 0, hi = (o.yesPool + o.noPool) * 2
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2
-    const k = o.yesPool * o.noPool
-    const nn = o.noPool + mid
-    const ny = k / nn
-    const pp = nn / (ny + nn)
-    if (pp < target) lo = mid; else hi = mid
-  }
-  return (lo + hi) / 2
 }

@@ -14,11 +14,15 @@ const ENDPOINTS = [
 
 const SCOPES = ['read:markets', 'read:prices', 'read:trades']
 
+const WEBHOOK_EVENTS = ['market.created', 'market.halted', 'market.resolved', 'trade.executed', 'kyc.approved', 'withdrawal.completed']
+
 export const AdminApi = () => {
-  const { state, adminCreateApiKey, adminRevokeApiKey } = useStore()
+  const { state, adminCreateApiKey, adminRevokeApiKey, adminCreateWebhook, adminToggleWebhook, adminDeleteWebhook } = useStore()
   const [label, setLabel] = useState('')
   const [scopes, setScopes] = useState<string[]>(['read:markets', 'read:prices'])
   const [limit, setLimit] = useState('120')
+  const [whUrl, setWhUrl] = useState('')
+  const [whEvents, setWhEvents] = useState<string[]>(['market.resolved'])
   const keys = state.apiKeys
 
   return (
@@ -93,6 +97,43 @@ export const AdminApi = () => {
               onClick={() => { adminCreateApiKey(label.trim(), scopes, parseFloat(limit) || 60); setLabel('') }}
             >
               Issue key
+            </button>
+          </div>
+        </div>
+
+        <div className="card card-pad stack" style={{ gap: 10 }}>
+          <div style={{ fontWeight: 700 }}>Webhooks <span className="hint" style={{ fontWeight: 400 }}>— push market lifecycle events to integrators (signed, retried)</span></div>
+          {state.settings.webhooks.map(w => (
+            <div key={w.id} className="row" style={{ justifyContent: 'space-between', borderBottom: '1px solid var(--grid)', paddingBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <code style={{ fontSize: 12 }}>{w.url}</code>
+                <div className="hint">{w.events.join(', ')} · {w.deliveries30d.toLocaleString()} deliveries (30d)</div>
+              </div>
+              <div className="row">
+                <span className={w.active ? 'badge badge-good' : 'badge'}><span className="dot" />{w.active ? 'Active' : 'Paused'}</span>
+                <button className="btn btn-sm" onClick={() => adminToggleWebhook(w.id)}>{w.active ? 'Pause' : 'Resume'}</button>
+                <button className="btn btn-sm btn-danger" onClick={() => adminDeleteWebhook(w.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+          <div className="row-wrap" style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ flex: 1, minWidth: 240 }}>
+              <label>Endpoint URL</label>
+              <input className="input" value={whUrl} onChange={e => setWhUrl(e.target.value)} placeholder="https://example.com/hooks/foresight" />
+            </div>
+            <div className="field">
+              <label>Events</label>
+              <div className="row-wrap" style={{ gap: 8 }}>
+                {WEBHOOK_EVENTS.map(ev => (
+                  <label key={ev} className="row" style={{ gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={whEvents.includes(ev)} onChange={e => setWhEvents(s2 => (e.target.checked ? [...s2, ev] : s2.filter(x => x !== ev)))} />
+                    {ev}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <button className="btn btn-primary" disabled={!/^https:\/\/./.test(whUrl) || !whEvents.length} onClick={() => { adminCreateWebhook(whUrl.trim(), whEvents); setWhUrl('') }}>
+              Register webhook
             </button>
           </div>
         </div>

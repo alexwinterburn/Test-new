@@ -169,10 +169,11 @@ const FLAG_META: Record<keyof Settings['featureFlags'], { label: string; desc: s
   referrals: { label: 'Referral program', desc: 'Invite codes with a cash reward on the referee’s first qualifying deposit. Reward size set in code (settings.referralReward).' },
   lpProgram: { label: 'LP program (Earn)', desc: 'Anyone can provide liquidity and earn a share of trading fees; the public pitch lives at Exchange → Earn.' },
   publicApi: { label: 'Public read API', desc: 'Read-only market data API plus the embeddable live-odds widget. Keys managed under API & widgets.' },
+  gamification: { label: 'Gamification', desc: 'XP, levels, achievements, streaks and daily quests. Off = purely functional exchange.' },
 }
 
 export const AdminFlags = () => {
-  const { state, adminToggleFlag, resetDemo } = useStore()
+  const { state, adminToggleFlag } = useStore()
   return (
     <>
       <div className="admin-head"><h1>Feature flags</h1><span className="hint">Ship dark, roll out gradually.</span></div>
@@ -187,15 +188,7 @@ export const AdminFlags = () => {
           </div>
         ))}
 
-        <div className="card card-pad" style={{ borderColor: 'var(--critical)' }}>
-          <div style={{ fontWeight: 700, color: 'var(--critical)' }}>Danger zone</div>
-          <div className="hint" style={{ margin: '6px 0 10px' }}>
-            Erase all demo data — markets, users, trades, settings — and restore the original seed. This is the “clean slate” for building the real product on top.
-          </div>
-          <button className="btn btn-danger" onClick={() => { if (confirm('Reset ALL demo data to the original seed?')) resetDemo() }}>
-            Reset demo data
-          </button>
-        </div>
+        <p className="hint">Demo-data reset and backups live in <strong>Data studio</strong>.</p>
       </div>
     </>
   )

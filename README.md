@@ -63,6 +63,14 @@ npm run build   # type-check + production build
   multi-outcome market to your combo slip.
 - **Embeddable widget** — `/embed/:id` is a chrome-less live-odds card for
   articles and newsletters, with copy-paste iframe code on every market page.
+- **Gamification** — XP with levels (nav chip + progress bar), 10 achievements,
+  daily login streaks, and daily quests on the home page. Feature-flagged.
+- **Notifications inbox** — a bell with two tabs: an inbox fed by the autonomous
+  engine and platform events, and self-serve price alerts (above/below a price,
+  or any N-point move in 24h) per market.
+- **Continuous copy-trading** — beyond one-time mirroring, start an auto-mirror
+  on any leader: every future buy they make is copied instantly, capped per
+  trade and guarded by your own KYC tier cap.
 
 ### Control Tower (`/admin`)
 - **Dashboard** — volume/trades/signups KPIs, 30-day volume chart, custodial balances,
@@ -94,6 +102,16 @@ npm run build   # type-check + production build
   live preview; it appears instantly at the top of the exchange.
 - **Feature flags** — community markets, AI resolution assist, limit orders,
   leaderboards, scalar markets, neg-risk bundles. Ship dark, roll out gradually.
+- **Comms & notifications** — the autonomous engine's rules (KYC reminders,
+  trade-inactivity nudges, watchlist movers, closing-soon warnings) with
+  operator-tunable thresholds, manual blasts to everyone or one user, and a
+  delivery log. Runs every 45s; dedupes per user per day.
+- **Analytics report builder** — compose views from volume/trades/signups/fees
+  over 7/14/30 days, export CSV, and save personalised named reports.
+- **Data studio** — collection browser with row counts, one-click JSON backup
+  export, validated restore/import, history compaction, and demo reset.
+- **Webhooks** — register/pause/delete signed event webhooks (market lifecycle,
+  trades, KYC, withdrawals) alongside API keys.
 - **Audit log** — every operator action, filterable.
 
 ### Deliberately not a clone

@@ -1,18 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppState, ComplianceAlert, Direction, KycTier, Market, MarketStatus, Order, Outcome, Position, Settings, Side, SlipLeg, User } from './types'
+import type { AppState, ComplianceAlert, Direction, KycTier, Market, MarketStatus, NotificationKind, Order, Outcome, Position, Settings, Side, SlipLeg, User } from './types'
+import { ACHIEVEMENTS, XP, dayKey, levelForXp } from './gamification'
 import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v5'
+const LS_KEY = 'foresight-demo-state-v6'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 5) return parsed
+      if (parsed.version === 6) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -52,12 +53,18 @@ interface StoreApi {
 
   toggleFollow: (userId: string) => void
   copyPortfolio: (leaderId: string, budget: number) => TradeResult
+  createCopyLink: (leaderId: string, perTradeCap: number) => void
+  cancelCopyLink: (linkId: string) => void
+
+  markNotificationsRead: () => void
+  dismissNotification: (id: string) => void
+  runNotificationEngine: () => void
   submitKyc: (tier: KycTier, docType: string, country: string) => void
   setSelfLimits: (limits: User['selfLimits']) => void
   proposeMarket: (question: string, category: string, source: string) => void
 
   toggleWatch: (marketId: string) => void
-  createAlert: (marketId: string, outcomeId: string, condition: 'above' | 'below', threshold: number) => void
+  createAlert: (marketId: string, outcomeId: string, condition: 'above' | 'below' | 'move', threshold: number) => void
   deleteAlert: (alertId: string) => void
 
   addToSlip: (leg: SlipLeg) => void
@@ -92,6 +99,15 @@ interface StoreApi {
   adminClearAnnouncement: () => void
   adminCreateApiKey: (label: string, scopes: string[], rateLimitPerMin: number) => void
   adminRevokeApiKey: (keyId: string) => void
+  adminCreateWebhook: (url: string, events: string[]) => void
+  adminToggleWebhook: (id: string) => void
+  adminDeleteWebhook: (id: string) => void
+  adminSendNotification: (target: 'all' | string, title: string, text: string) => void
+  adminSaveReport: (name: string, metrics: string[], rangeDays: number) => void
+  adminDeleteReport: (id: string) => void
+  exportStateJson: () => string
+  importStateJson: (raw: string) => { ok: boolean; error?: string }
+  pruneHistory: () => void
   resetDemo: () => void
 }
 
@@ -145,6 +161,97 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       if (h.length > 2000) h.splice(0, h.length - 2000)
     }
 
+    /** Push an in-app notification, deduped per user+kind+link per day. */
+    const notify = (draft: AppState, userId: string, kind: NotificationKind, title: string, text: string, link?: string) => {
+      const today = dayKey()
+      if (draft.notifications.some(n => n.userId === userId && n.kind === kind && n.link === link && dayKey(n.at) === today && n.title === title)) return
+      draft.notifications.unshift({ id: shortId(), userId, kind, title, text, link, read: false, at: Date.now() })
+      if (draft.notifications.length > 400) draft.notifications.length = 400
+      const u = draft.users.find(x => x.id === userId)
+      if (u?.notificationPrefs.email || u?.notificationPrefs.push) {
+        // production: hand off to the delivery service here (email/push)
+      }
+    }
+
+    const awardXp = (draft: AppState, userId: string, amount: number) => {
+      if (!draft.settings.featureFlags.gamification) return
+      const u = draft.users.find(x => x.id === userId)
+      if (!u) return
+      const before = levelForXp(u.xp)
+      u.xp += amount
+      const after = levelForXp(u.xp)
+      if (after > before) {
+        notify(draft, userId, 'level-up', `Level ${after} reached! 🎉`, `You crossed ${u.xp.toLocaleString()} XP. Keep forecasting.`, '#/portfolio')
+        if (userId === draft.sessionUserId) queueMicrotask(() => toast('success', `🎉 Level up — you are now level ${after}`))
+      }
+    }
+
+    const grantAchievement = (draft: AppState, userId: string, achId: string) => {
+      if (!draft.settings.featureFlags.gamification) return
+      const u = draft.users.find(x => x.id === userId)
+      const def = ACHIEVEMENTS.find(a => a.id === achId)
+      if (!u || !def || u.achievements.includes(achId)) return
+      u.achievements.push(achId)
+      u.xp += def.xp
+      notify(draft, userId, 'achievement', `Achievement: ${def.name} ${def.icon}`, `${def.desc} (+${def.xp} XP)`, '#/portfolio')
+      if (userId === draft.sessionUserId) queueMicrotask(() => toast('success', `${def.icon} Achievement unlocked: ${def.name} (+${def.xp} XP)`))
+    }
+
+    /** Daily login streak + XP; called when a session starts or resumes on a new day. */
+    const touchLogin = (draft: AppState, userId: string) => {
+      const u = draft.users.find(x => x.id === userId)
+      if (!u) return
+      const today = dayKey()
+      if (u.lastLoginDay === today) return
+      const yesterday = dayKey(Date.now() - 86400000)
+      u.loginStreak = u.lastLoginDay === yesterday ? u.loginStreak + 1 : 1
+      u.lastLoginDay = today
+      awardXp(draft, userId, XP.dailyLogin)
+      if (u.loginStreak >= 7) grantAchievement(draft, userId, 'streak-7')
+    }
+
+    /** The autonomous notification engine: reminders and watchers for every user. */
+    const runEngine = (draft: AppState) => {
+      const cfg = draft.settings.autoNotify
+      const now = Date.now()
+      for (const u of draft.users) {
+        if (u.isAdmin || u.suspended) continue
+        // KYC reminder: unverified users with a meaningful balance
+        if (cfg.kycReminders && u.kycTier === 0 && u.kycStatus === 'none' && u.balance >= 100) {
+          notify(draft, u.id, 'reminder-kyc', 'Unlock your full limits', `You have ${fmtUsd(u.balance, 0)} on the platform but are still Tier 0. Verify once and forget it — takes about two minutes.`, '#/wallet')
+        }
+        // trade-inactivity nudge
+        if (cfg.tradeReminders && u.lastTradeAt && now - u.lastTradeAt > cfg.inactivityDays * 86400000) {
+          notify(draft, u.id, 'reminder-trade', 'The markets moved without you', `You haven't traded in ${Math.floor((now - u.lastTradeAt) / 86400000)} days. ${draft.markets.filter(m => m.status === 'active').length} markets are live right now.`, '#/')
+        }
+        // watchlist movers
+        if (cfg.watchlistMovers) {
+          for (const mid of u.watchlist) {
+            const m = draft.markets.find(x => x.id === mid)
+            if (!m || m.status !== 'active') continue
+            const h = m.history[m.outcomes[0].id] ?? []
+            const nowP = h[h.length - 1]?.p
+            const dayAgo = h.filter(x => x.t <= now - 86400000).slice(-1)[0]?.p
+            if (nowP === undefined || dayAgo === undefined) continue
+            const move = (nowP - dayAgo) * 100
+            if (Math.abs(move) >= cfg.moveThresholdPts) {
+              notify(draft, u.id, 'watchlist-move', 'Watchlist mover', `"${m.question.slice(0, 55)}" ${move > 0 ? 'rose' : 'fell'} ${Math.abs(move).toFixed(0)}pts in 24h — now ${Math.round(nowP * 100)}%.`, `#/market/${m.id}`)
+            }
+          }
+        }
+        // markets closing soon where the user holds a position
+        if (cfg.closingSoon) {
+          const held = new Set(draft.positions.filter(pn => pn.userId === u.id).map(pn => pn.marketId))
+          for (const mid of held) {
+            const m = draft.markets.find(x => x.id === mid)
+            if (m && m.status === 'active' && m.closesAt - now < 48 * 3600000 && m.closesAt > now) {
+              notify(draft, u.id, 'closing-soon', 'Position in a closing market', `"${m.question.slice(0, 55)}" closes in under 48h. Adjust or hold?`, `#/market/${m.id}`)
+            }
+          }
+        }
+      }
+    }
+
     /** Route a share of the trading fee to the market's liquidity providers. */
     const distributeLpFees = (draft: AppState, marketId: string, fee: number) => {
       if (fee <= 0) return
@@ -167,10 +274,26 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         const o = m.outcomes.find(x => x.id === a.outcomeId)
         if (!o) continue
         const p = price(o)
-        if ((a.condition === 'above' && p >= a.threshold) || (a.condition === 'below' && p <= a.threshold)) {
+        let hit = false
+        let desc = ''
+        if (a.condition === 'move') {
+          const h = m.history[o.id] ?? []
+          const dayAgo = h.filter(x => x.t <= Date.now() - 86400000).slice(-1)[0]?.p ?? h[0]?.p
+          if (dayAgo !== undefined && Math.abs(p - dayAgo) >= a.threshold) {
+            hit = true
+            desc = `moved ${(Math.abs(p - dayAgo) * 100).toFixed(0)}pts in 24h (now ${Math.round(p * 100)}%)`
+          }
+        } else if ((a.condition === 'above' && p >= a.threshold) || (a.condition === 'below' && p <= a.threshold)) {
+          hit = true
+          desc = `is now ${a.condition} ${Math.round(a.threshold * 100)}% (${Math.round(p * 100)}%)`
+        }
+        if (hit) {
           a.triggeredAt = Date.now()
-          if (a.userId === draft.sessionUserId)
-            toast('info', `🔔 Alert: “${m.question.slice(0, 45)}…” is now ${a.condition} ${Math.round(a.threshold * 100)}% (${Math.round(p * 100)}%)`)
+          notify(draft, a.userId, 'price-alert', 'Price alert triggered', `"${m.question.slice(0, 55)}" ${desc}.`, `#/market/${m.id}`)
+          if (a.userId === draft.sessionUserId) {
+            const msg = `🔔 Alert: "${m.question.slice(0, 45)}…" ${desc}`
+            queueMicrotask(() => toast('info', msg))
+          }
         }
       }
     }
@@ -195,7 +318,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         if (ord.marketId !== marketId || (ord.status !== 'open' && ord.status !== 'partial')) continue
         const o = m.outcomes.find(x => x.id === ord.outcomeId)!
         if (price(o, ord.side) > ord.limitPrice + 1e-9) continue
-        const user = draft.users.find(u => u.id === ord.userId)!
+        const user = draft.users.find(u => u.id === ord.userId)
+        if (!user || user.suspended) continue
         const remaining = ord.shares - ord.filled
         const cost = remaining * price(o, ord.side) * 1.02 // approx; capped by balance below
         const spend = Math.min(cost, user.balance)
@@ -239,6 +363,11 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         if (user && payout > 0.005) {
           user.balance += payout
           draft.txs.unshift({ id: shortId(), userId: user.id, type: 'settlement', amount: payout, status: 'completed', note: `Settlement: ${m.question.slice(0, 50)}`, createdAt: Date.now() })
+          notify(draft, user.id, 'settlement', 'Market settled — you got paid', `"${m.question.slice(0, 55)}" settled. ${fmtUsd(payout)} credited to your balance.`, '#/portfolio')
+          if (payout > pos.shares * pos.avgPrice) {
+            grantAchievement(draft, user.id, 'prophet')
+            awardXp(draft, user.id, XP.settlementWin)
+          }
         }
         pos.realizedPnl += payout - pos.shares * pos.avgPrice
       }
@@ -262,7 +391,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         const u = s.users.find(x => x.email.toLowerCase() === email.toLowerCase())
         if (!u) return { ok: false, error: 'No account found for that email. Try signing up.' }
         if (u.suspended) return { ok: false, error: 'This account is suspended. Contact support.' }
-        mutate(d => { d.sessionUserId = u.id })
+        mutate(d => { d.sessionUserId = u.id; touchLogin(d, u.id) })
         toast('success', `Welcome back, ${u.name.split(' ')[0]}!`)
         return { ok: true }
       },
@@ -284,9 +413,11 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             referralCode: (handle.toUpperCase() + shortId().toUpperCase()).slice(0, 8),
             referredBy: code || null, referralRewardPaid: false, follows: [],
             notificationPrefs: { email: true, push: false },
+            xp: 0, achievements: [], loginStreak: 0, lastLoginDay: '', lastTradeAt: null,
           }
           d.users.push(u)
           d.sessionUserId = u.id
+          touchLogin(d, u.id)
           d.txs.unshift({ id: shortId(), userId: u.id, type: 'adjustment', amount: 100, status: 'completed', note: 'Welcome credit', createdAt: Date.now() })
         })
         toast('success', 'Account created — $100 welcome credit added. Verify identity later, only when you need higher limits or withdrawals.')
@@ -335,6 +466,37 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             if (fee > 0) d.txs.unshift({ id: shortId(), userId: du.id, type: 'fee', amount: 0, status: 'completed', note: `Trading fee ${fmtUsd(fee)} included`, createdAt: Date.now() })
             distributeLpFees(d, marketId, fee)
             const newP = price(dm.outcomes[idx])
+            du.lastTradeAt = Date.now()
+            awardXp(d, du.id, XP.trade)
+            grantAchievement(d, du.id, 'first-trade')
+            if (amount >= 500) grantAchievement(d, du.id, 'whale')
+            const cats = new Set(d.positions.filter(pn => pn.userId === du.id).map(pn => d.markets.find(mm => mm.id === pn.marketId)?.category))
+            if (cats.size >= 3) grantAchievement(d, du.id, 'diversified')
+            // continuous copy-trading: mirror this buy for active followers
+            if (d.settings.featureFlags.copyTrading) {
+              for (const link of d.copyLinks.filter(l => l.active && l.leaderId === du.id)) {
+                const follower = d.users.find(x => x.id === link.followerId)
+                if (!follower || follower.suspended) continue
+                const mirrorAmt = Math.min(link.perTradeCap, follower.balance)
+                if (mirrorAmt < 1) continue
+                // mirrored trades respect the follower's own KYC tier cap
+                const followerCost = d.positions.filter(pn => pn.userId === follower.id).reduce((a2, pn) => a2 + pn.shares * pn.avgPrice, 0)
+                if (followerCost + mirrorAmt > d.settings.tierTradeCaps[follower.kycTier]) {
+                  notify(d, follower.id, 'copy-trade', 'Mirror skipped — tier limit', `A trade by @${du.handle} was not mirrored because it would exceed your Tier ${follower.kycTier} position cap. Verify to raise it.`, '#/wallet')
+                  continue
+                }
+                const idx2 = dm.outcomes.findIndex(x => x.id === outcomeId)
+                const q2 = quoteBuy(dm.outcomes[idx2], side, mirrorAmt * (1 - feeRate))
+                dm.outcomes[idx2] = applyBuy(dm.outcomes[idx2], side, mirrorAmt * (1 - feeRate))
+                follower.balance -= mirrorAmt
+                dm.volume += mirrorAmt
+                link.mirrored += mirrorAmt
+                upsertPosition(d, follower.id, dm, outcomeId, side, q2.shares, q2.avgPrice)
+                recordTrade(d, follower.id, dm, outcomeId, side, 'buy', q2.shares, q2.avgPrice)
+                d.txs.unshift({ id: shortId(), userId: follower.id, type: 'trade', amount: -mirrorAmt, status: 'completed', note: `Auto-mirror @${du.handle}: ${q2.shares.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q2.avgPrice)}`, createdAt: Date.now() })
+                notify(d, follower.id, 'copy-trade', 'Trade mirrored', `Copied @${du.handle}: bought ${q2.shares.toFixed(0)} ${side.toUpperCase()} on "${dm.question.slice(0, 45)}" for ${fmtUsd(mirrorAmt)}.`, `#/market/${dm.id}`)
+              }
+            }
             if (d.settings.circuitBreaker.enabled && Math.abs(newP - oldP) * 100 >= d.settings.circuitBreaker.movePct) {
               dm.status = 'halted'
               dm.haltReason = `Circuit breaker: single trade moved price ${(Math.abs(newP - oldP) * 100).toFixed(1)}pts`
@@ -365,6 +527,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             if (dp.shares < 0.01) d.positions = d.positions.filter(p => p.id !== dp.id)
             pushHistory(d, dm, dm.outcomes[idx])
             recordTrade(d, du.id, dm, outcomeId, side, 'sell', amount, q.avgPrice)
+            du.lastTradeAt = Date.now()
             checkAlerts(d, dm)
             distributeLpFees(d, marketId, q.proceeds * feeRate)
             d.txs.unshift({ id: shortId(), userId: du.id, type: 'trade', amount: net, status: 'completed', note: `Sell ${amount.toFixed(0)} ${side.toUpperCase()} @ ${fmtCents(q.avgPrice)} · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
@@ -424,6 +587,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           const u = d.users.find(x => x.id === tx.userId)!
           u.balance += tx.amount
           u.totalDeposited += tx.amount
+          awardXp(d, u.id, XP.deposit)
           // referral reward: referrer is paid on the referee's first qualifying confirmed deposit
           if (d.settings.featureFlags.referrals && u.referredBy && !u.referralRewardPaid && tx.amount >= d.settings.referralMinDeposit) {
             const referrer = d.users.find(x => x.referralCode === u.referredBy)
@@ -431,6 +595,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
               u.referralRewardPaid = true
               referrer.balance += d.settings.referralReward
               d.txs.unshift({ id: shortId(), userId: referrer.id, type: 'adjustment', amount: d.settings.referralReward, status: 'completed', note: `Referral reward — @${u.handle} made their first deposit`, createdAt: Date.now() })
+              notify(d, referrer.id, 'reward', 'Referral reward earned 🎁', `@${u.handle} made their first deposit — ${fmtUsd(d.settings.referralReward)} credited.`, '#/wallet')
+              grantAchievement(d, referrer.id, 'social')
+              awardXp(d, referrer.id, XP.referral)
             }
           }
         })
@@ -465,6 +632,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           if (existing) existing.amount += amount
           else d.lps.push({ id: shortId(), userId: u.id, marketId, amount, feesEarned: 0, addedAt: Date.now() })
           d.txs.unshift({ id: shortId(), userId: u.id, type: 'adjustment', amount: -amount, status: 'completed', note: `LP deposit · ${m.question.slice(0, 40)}`, createdAt: Date.now() })
+          awardXp(d, u.id, XP.lpProvide)
+          grantAchievement(d, u.id, 'market-maker')
         })
         toast('success', `Providing ${fmtUsd(amount)} of liquidity — you now earn ${(s.settings.lpFeeShareBps / 100).toFixed(0)}% of this market's trading fees pro-rata`)
         return { ok: true }
@@ -564,6 +733,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         if (!u) return
         mutate(d => {
           d.proposals.unshift({ id: shortId(), userId: u.id, question, category, resolutionSource: source, status: 'pending', submittedAt: Date.now() })
+          grantAchievement(d, u.id, 'scout')
         })
         toast('success', 'Market proposal submitted for review')
       },
@@ -584,8 +754,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         if (!u) { toast('info', 'Sign in to set alerts'); return }
         mutate(d => {
           d.alerts.unshift({ id: shortId(), userId: u.id, marketId, outcomeId, condition, threshold, createdAt: Date.now() })
+          awardXp(d, u.id, XP.alertSet)
+          if (d.alerts.filter(a => a.userId === u.id && !a.triggeredAt).length >= 3) grantAchievement(d, u.id, 'scholar')
         })
-        toast('success', `Alert set: notify when price goes ${condition} ${Math.round(threshold * 100)}%`)
+        toast('success', condition === 'move'
+          ? `Alert set: notify on any ${Math.round(threshold * 100)}pt move in 24h`
+          : `Alert set: notify when price goes ${condition} ${Math.round(threshold * 100)}%`)
       },
 
       deleteAlert: (alertId) => {
@@ -615,7 +789,11 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           const res = self.trade(leg.marketId, leg.outcomeId, leg.side, 'buy', leg.amount)
           if (!res.ok) { toast('error', `Slip stopped: ${res.error}`); return res }
         }
-        mutate(d => { d.slip = [] })
+        mutate(d => {
+          d.slip = []
+          awardXp(d, u.id, XP.combo)
+          if (legs.length >= 3) grantAchievement(d, u.id, 'combo-master')
+        })
         toast('success', `Combo placed — ${legs.length} legs, ${fmtUsd(total)} total`)
         return { ok: true }
       },
@@ -720,6 +898,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           const u = d.users.find(x => x.id === r.userId)!
           if (approve) { u.kycTier = r.requestedTier; u.kycStatus = 'approved' }
           else { u.kycStatus = 'rejected' }
+          notify(d, u.id, 'kyc', approve ? `You're verified — Tier ${r.requestedTier} unlocked ✅` : 'Verification needs another look',
+            approve ? 'Higher limits and withdrawals are now available.' : `Your submission was rejected${reason ? `: ${reason}` : ''}. You can resubmit anytime.`, '#/wallet')
           audit(d, approve ? 'kyc.approve' : 'kyc.reject', `${approve ? 'Approved' : 'Rejected'} Tier ${r.requestedTier} for @${u.handle}${reason ? ` — ${reason}` : ''}`)
         })
         toast(approve ? 'success' : 'info', approve ? 'KYC approved' : 'KYC rejected')
@@ -731,6 +911,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           tx.status = approve ? 'completed' : 'rejected'
           const u = d.users.find(x => x.id === tx.userId)!
           if (!approve) { u.balance += -tx.amount; u.totalWithdrawn -= -tx.amount; tx.note += ' — rejected, funds returned' }
+          notify(d, u.id, 'withdrawal', approve ? 'Withdrawal approved' : 'Withdrawal rejected',
+            approve ? `Your ${fmtUsd(-tx.amount)} withdrawal has been sent.` : `Your ${fmtUsd(-tx.amount)} withdrawal was rejected and funds were returned to your balance.`, '#/wallet')
           audit(d, approve ? 'finance.withdrawal-approve' : 'finance.withdrawal-reject', `${approve ? 'Approved' : 'Rejected'} ${fmtUsd(-tx.amount)} withdrawal for @${u.handle}`)
         })
         toast('success', approve ? 'Withdrawal approved' : 'Withdrawal rejected — funds returned')
@@ -840,6 +1022,124 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         toast('info', 'API key revoked')
       },
 
+      createCopyLink: (leaderId, perTradeCap) => {
+        const u = currentUser
+        if (!u) { toast('info', 'Sign in first'); return }
+        mutate(d => {
+          const existing = d.copyLinks.find(l => l.followerId === u.id && l.leaderId === leaderId)
+          if (existing) { existing.active = true; existing.perTradeCap = perTradeCap }
+          else d.copyLinks.push({ id: shortId(), followerId: u.id, leaderId, perTradeCap, active: true, createdAt: Date.now(), mirrored: 0 })
+          const du = d.users.find(x => x.id === u.id)!
+          if (!du.follows.includes(leaderId)) du.follows.push(leaderId)
+        })
+        const leader = userById(leaderId)
+        toast('success', `Auto-mirroring @${leader?.handle} — up to ${fmtUsd(perTradeCap, 0)} per trade. Cancel anytime from the leaderboard.`)
+      },
+
+      cancelCopyLink: (linkId) => {
+        mutate(d => { const l = d.copyLinks.find(x => x.id === linkId); if (l) l.active = false })
+        toast('info', 'Auto-mirroring stopped')
+      },
+
+      markNotificationsRead: () => {
+        const u = currentUser
+        if (!u) return
+        if (!s.notifications.some(n => n.userId === u.id && !n.read)) return
+        mutate(d => { d.notifications.forEach(n => { if (n.userId === u.id) n.read = true }) })
+      },
+
+      dismissNotification: (id) => {
+        mutate(d => { d.notifications = d.notifications.filter(n => n.id !== id) })
+      },
+
+      runNotificationEngine: () => {
+        mutate(d => {
+          if (d.sessionUserId) touchLogin(d, d.sessionUserId)
+          runEngine(d)
+        })
+      },
+
+      adminCreateWebhook: (url, events) => {
+        mutate(d => {
+          d.settings.webhooks.push({ id: shortId(), url, events, active: true, deliveries30d: 0 })
+          audit(d, 'api.webhook-create', `Webhook ${url} (${events.join(', ')})`)
+        })
+        toast('success', 'Webhook registered')
+      },
+
+      adminToggleWebhook: (id) => {
+        mutate(d => {
+          const w = d.settings.webhooks.find(x => x.id === id)!
+          w.active = !w.active
+          audit(d, 'api.webhook-toggle', `${w.url} → ${w.active ? 'active' : 'paused'}`)
+        })
+      },
+
+      adminDeleteWebhook: (id) => {
+        mutate(d => {
+          const w = d.settings.webhooks.find(x => x.id === id)
+          d.settings.webhooks = d.settings.webhooks.filter(x => x.id !== id)
+          if (w) audit(d, 'api.webhook-delete', w.url)
+        })
+        toast('info', 'Webhook deleted')
+      },
+
+      adminSendNotification: (target, title, text) => {
+        mutate(d => {
+          const targets = target === 'all' ? d.users.filter(u => !u.isAdmin && !u.suspended) : d.users.filter(u => u.id === target)
+          for (const u of targets) notify(d, u.id, 'admin-message', title, text)
+          audit(d, 'comms.notification', `Sent "${title}" to ${target === 'all' ? `${targets.length} users` : '@' + (targets[0]?.handle ?? target)}`)
+        })
+        toast('success', 'Notification sent')
+      },
+
+      adminSaveReport: (name, metrics, rangeDays) => {
+        mutate(d => {
+          d.settings.savedReports.unshift({ id: shortId(), name, metrics, rangeDays, createdAt: Date.now() })
+          audit(d, 'analytics.report-save', `Saved report "${name}" (${metrics.join(', ')}, ${rangeDays}d)`)
+        })
+        toast('success', 'Report saved')
+      },
+
+      adminDeleteReport: (id) => {
+        mutate(d => { d.settings.savedReports = d.settings.savedReports.filter(r => r.id !== id) })
+        toast('info', 'Report deleted')
+      },
+
+      exportStateJson: () => JSON.stringify(s, null, 2),
+
+      importStateJson: (raw) => {
+        try {
+          const parsed = JSON.parse(raw) as AppState
+          if (typeof parsed !== 'object' || parsed === null) return { ok: false, error: 'Not a JSON object.' }
+          if (parsed.version !== 6) return { ok: false, error: `Version mismatch: expected 6, got ${(parsed as any).version}.` }
+          for (const key of ['users', 'markets', 'positions', 'orders', 'txs', 'notifications'] as const) {
+            if (!Array.isArray(parsed[key])) return { ok: false, error: `Missing or invalid collection: ${key}` }
+          }
+          setState(parsed)
+          toast('success', 'Backup imported — state restored')
+          return { ok: true }
+        } catch (e) {
+          return { ok: false, error: 'Invalid JSON: ' + (e as Error).message }
+        }
+      },
+
+      pruneHistory: () => {
+        mutate(d => {
+          let removed = 0
+          for (const m of d.markets) {
+            for (const oid of Object.keys(m.history)) {
+              const h = m.history[oid]
+              if (h.length > 240) { removed += h.length - 240; m.history[oid] = h.slice(-240) }
+            }
+          }
+          d.trades = d.trades.slice(0, 100)
+          d.audit = d.audit.slice(0, 200)
+          audit(d, 'data.prune', `Pruned ${removed.toLocaleString()} price points; trimmed trade + audit logs`)
+        })
+        toast('success', 'History pruned — storage compacted')
+      },
+
       resetDemo: () => {
         localStorage.removeItem(LS_KEY)
         setState(buildSeed())
@@ -848,6 +1148,15 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     }
     return self
   }, [state, toasts, mutate, toast, dismissToast])
+
+  // Autonomous notification engine: runs on load and every 45s.
+  const apiRef = useRef(api)
+  apiRef.current = api
+  useEffect(() => {
+    const t = setTimeout(() => apiRef.current.runNotificationEngine(), 800)
+    const iv = setInterval(() => apiRef.current.runNotificationEngine(), 45000)
+    return () => { clearTimeout(t); clearInterval(iv) }
+  }, [])
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>
 }

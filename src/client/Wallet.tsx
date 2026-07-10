@@ -34,6 +34,12 @@ export const Wallet = () => {
 
   useEffect(() => () => { if (confirmTimer.current) clearTimeout(confirmTimer.current) }, [])
 
+  // the component stays mounted across sign-in/out — reset per-user UI state
+  const userKey = currentUser?.id
+  useEffect(() => {
+    setTab('deposit'); setPendingTxId(null); setError(''); setDestAddr(''); setAmount('100')
+  }, [userKey])
+
   if (!currentUser) {
     return (
       <main className="page-inner">
