@@ -151,6 +151,7 @@ export interface User {
   referralRewardPaid: boolean
   follows: string[] // user ids this account follows (copy-trading)
   notificationPrefs: { email: boolean; push: boolean }
+  authProvider: 'email' | 'google' | 'apple' | 'x'
   // gamification
   xp: number
   achievements: string[] // achievement ids
@@ -288,6 +289,14 @@ export interface Settings {
     moveThresholdPts: number // watchlist mover threshold, in probability points
   }
   webhooks: { id: string; url: string; events: string[]; active: boolean; deliveries30d: number }[]
+  email: {
+    provider: 'sendgrid' | 'postmark' | 'ses'
+    apiKeySet: boolean
+    fromAddress: string
+    sandboxMode: boolean
+    sent30d: number
+    templates: { id: string; name: string; trigger: string }[]
+  }
   savedReports: SavedReport[]
   dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
   announcement: { text: string; kind: 'info' | 'warning' | 'critical'; at: number } | null

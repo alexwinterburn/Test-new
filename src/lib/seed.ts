@@ -189,6 +189,7 @@ const mkUser = (
   referralRewardPaid: false,
   follows: [],
   notificationPrefs: { email: true, push: false },
+  authProvider: 'email' as const,
   xp: 0,
   achievements: [],
   loginStreak: 1,
@@ -362,7 +363,7 @@ export const buildSeed = (): AppState => {
   ]
 
   return {
-    version: 6,
+    version: 7,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
     trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys, notifications, copyLinks,
@@ -398,6 +399,20 @@ export const buildSeed = (): AppState => {
         closingSoon: true,
         inactivityDays: 7,
         moveThresholdPts: 5,
+      },
+      email: {
+        provider: 'sendgrid' as const,
+        apiKeySet: true,
+        fromAddress: 'alerts@foresight.demo',
+        sandboxMode: true,
+        sent30d: 12840,
+        templates: [
+          { id: 'tpl-1', name: 'Price alert triggered', trigger: 'price-alert' },
+          { id: 'tpl-2', name: 'Market settled', trigger: 'settlement' },
+          { id: 'tpl-3', name: 'KYC decision', trigger: 'kyc' },
+          { id: 'tpl-4', name: 'Withdrawal update', trigger: 'withdrawal' },
+          { id: 'tpl-5', name: 'Inactivity win-back', trigger: 'reminder-trade' },
+        ],
       },
       savedReports: [
         { id: 'rep-1', name: 'Weekly growth snapshot', metrics: ['volume', 'signups'], rangeDays: 7, createdAt: t - 10 * DAY },

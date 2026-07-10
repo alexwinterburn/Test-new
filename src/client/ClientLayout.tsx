@@ -37,6 +37,7 @@ export const ClientLayout = () => {
               <NavLink to="/earn" className={({ isActive }) => (isActive ? 'on' : '')}>Earn</NavLink>
             )}
             <NavLink to="/wallet" className={({ isActive }) => (isActive ? 'on' : '')}>Wallet</NavLink>
+            <NavLink to="/developers" className={({ isActive }) => (isActive ? 'on' : '')}>Developers</NavLink>
           </nav>
           <div className="nav-search">
             <span className="icon" aria-hidden="true">⌕</span>
@@ -107,6 +108,7 @@ export const ClientLayout = () => {
         <div className="footer-inner">
           <span><strong>Foresight</strong> — prediction markets prototype. All data is simulated demo data.</span>
           <span>Fee: {(state.settings.tradingFeeBps / 100).toFixed(2)}%</span>
+          <Link to="/developers" style={{ color: 'var(--accent)' }}>Developers & API →</Link>
           <Link to="/admin" style={{ color: 'var(--accent)' }}>Admin console →</Link>
         </div>
       </footer>

@@ -17,6 +17,7 @@ import { AdminComms, AdminData } from './admin/Comms'
 import { Leaderboard } from './client/Leaderboard'
 import { Earn } from './client/Earn'
 import { Embed } from './client/Embed'
+import { Developers } from './client/Developers'
 
 export const App = () => (
   <StoreProvider>
@@ -28,6 +29,7 @@ export const App = () => (
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/earn" element={<Earn />} />
+          <Route path="/developers" element={<Developers />} />
           <Route path="/wallet" element={<Wallet />} />
         </Route>
         <Route path="/embed/:id" element={<Embed />} />

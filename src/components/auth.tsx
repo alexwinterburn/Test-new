@@ -8,7 +8,7 @@ import type { KycTier } from '../lib/types'
 // Sign in / sign up — deliberately frictionless: email only, no KYC up front.
 // ---------------------------------------------------------------------------
 export const AuthModal = ({ onClose, initialMode = 'signup' }: { onClose: () => void; initialMode?: 'signin' | 'signup' }) => {
-  const { signIn, signUp, state } = useStore()
+  const { signIn, signUp, signInWithProvider, state } = useStore()
   const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
@@ -31,6 +31,18 @@ export const AuthModal = ({ onClose, initialMode = 'signup' }: { onClose: () => 
           ? 'Just an email to get started — trade instantly with your welcome credit. Identity verification is only needed later, for higher limits or withdrawals.'
           : 'Demo accounts: alex.winterburn@gmail.com (trader) · dana@example.com (verified pro)'}
       </p>
+      <div className="grid-3" style={{ gap: 8 }}>
+        {([['google', 'G', 'Google'], ['apple', '', 'Apple'], ['x', '𝕏', 'X']] as const).map(([prov, icon, label]) => (
+          <button key={prov} className="btn" style={{ padding: '10px 8px' }} onClick={() => { signInWithProvider(prov); onClose() }}>
+            <strong style={{ fontSize: 15 }}>{icon}</strong> {label}
+          </button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+        <span style={{ flex: 1, height: 1, background: 'var(--grid)' }} />
+        <span className="hint">or with email</span>
+        <span style={{ flex: 1, height: 1, background: 'var(--grid)' }} />
+      </div>
       {mode === 'signup' && (
         <div className="field">
           <label>Full name</label>

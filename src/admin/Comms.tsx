@@ -7,8 +7,12 @@ import { fmtAgo } from '../lib/format'
 // Comms: autonomous notification engine controls + manual blasts + log
 // ---------------------------------------------------------------------------
 export const AdminComms = () => {
-  const { state, adminUpdateSettings, adminSendNotification, runNotificationEngine, userById } = useStore()
+  const { state, adminUpdateSettings, adminSendNotification, runNotificationEngine, adminSendTestEmail, userById } = useStore()
   const an = state.settings.autoNotify
+  const em = state.settings.email
+  const [fromAddr, setFromAddr] = useState(em.fromAddress)
+  const [apiKey, setApiKey] = useState('')
+  const [testTo, setTestTo] = useState('')
   const [inactivity, setInactivity] = useState(String(an.inactivityDays))
   const [movePts, setMovePts] = useState(String(an.moveThresholdPts))
   const [target, setTarget] = useState('all')
@@ -91,6 +95,60 @@ export const AdminComms = () => {
           >
             Send to {target === 'all' ? 'everyone' : '@' + userById(target)?.handle}
           </button>
+        </div>
+
+        <div className="card card-pad stack" style={{ gap: 10 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <div style={{ fontWeight: 700 }}>📧 Email delivery (SendGrid integration)</div>
+            <span className={em.apiKeySet ? 'badge badge-good' : 'badge badge-critical'}>
+              <span className="dot" />{em.apiKeySet ? `Connected · ${em.sandboxMode ? 'sandbox' : 'live'}` : 'Not configured'}
+            </span>
+          </div>
+          <p className="hint">
+            Every in-app notification with a user email preference on is handed to the provider here. Wire-up:
+            set the API key, verify the from-domain (SPF/DKIM), map templates to notification kinds — the engine does the rest.
+            {' '}{em.sent30d.toLocaleString()} emails sent in the last 30 days.
+          </p>
+          <div className="row-wrap" style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ width: 150 }}>
+              <label>Provider</label>
+              <select className="select" value={em.provider} onChange={e => adminUpdateSettings({ email: { ...em, provider: e.target.value as typeof em.provider } })}>
+                <option value="sendgrid">SendGrid</option>
+                <option value="postmark">Postmark</option>
+                <option value="ses">Amazon SES</option>
+              </select>
+            </div>
+            <div className="field" style={{ width: 210 }}>
+              <label>API key</label>
+              <input className="input" type="password" placeholder={em.apiKeySet ? '•••••••••••• (set)' : 'SG.xxxxx'} value={apiKey} onChange={e => setApiKey(e.target.value)} />
+            </div>
+            <div className="field" style={{ width: 210 }}>
+              <label>From address (verified domain)</label>
+              <input className="input" value={fromAddr} onChange={e => setFromAddr(e.target.value)} />
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => { adminUpdateSettings({ email: { ...em, apiKeySet: em.apiKeySet || apiKey.length > 5, fromAddress: fromAddr } }); setApiKey('') }}
+            >
+              Save
+            </button>
+          </div>
+          <div className="row-wrap" style={{ gap: 8 }}>
+            {em.templates.map(t => (
+              <span key={t.id} className="badge" style={{ textTransform: 'none' }}>{t.name} <span className="muted">→ {t.trigger}</span></span>
+            ))}
+          </div>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div className="field" style={{ width: 240 }}>
+              <label>Send a test email</label>
+              <input className="input" placeholder="you@example.com" value={testTo} onChange={e => setTestTo(e.target.value)} />
+            </div>
+            <button className="btn" disabled={!/.+@.+\..+/.test(testTo)} onClick={() => { adminSendTestEmail(testTo); setTestTo('') }}>Send test</button>
+            <label className="row" style={{ gap: 6, marginLeft: 'auto', fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={em.sandboxMode} onChange={e => adminUpdateSettings({ email: { ...em, sandboxMode: e.target.checked } })} />
+              Sandbox mode (validate, don't deliver)
+            </label>
+          </div>
         </div>
 
         <div className="card">

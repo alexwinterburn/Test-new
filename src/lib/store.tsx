@@ -6,14 +6,14 @@ import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v6'
+const LS_KEY = 'foresight-demo-state-v7'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 6) return parsed
+      if (parsed.version === 7) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -35,6 +35,8 @@ interface StoreApi {
 
   signIn: (email: string) => { ok: boolean; error?: string }
   signUp: (email: string, name: string, referralCode?: string) => { ok: boolean; error?: string }
+  signInWithProvider: (provider: 'google' | 'apple' | 'x') => void
+  adminSendTestEmail: (to: string) => void
   signOut: () => void
   signInAsAdmin: () => void
 
@@ -414,6 +416,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             referredBy: code || null, referralRewardPaid: false, follows: [],
             notificationPrefs: { email: true, push: false },
             xp: 0, achievements: [], loginStreak: 0, lastLoginDay: '', lastTradeAt: null,
+            authProvider: 'email',
           }
           d.users.push(u)
           d.sessionUserId = u.id
@@ -422,6 +425,51 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         })
         toast('success', 'Account created — $100 welcome credit added. Verify identity later, only when you need higher limits or withdrawals.')
         return { ok: true }
+      },
+
+      signInWithProvider: (provider) => {
+        // Simulated OAuth: production redirects to the provider and receives a
+        // verified profile; here we mint/reuse a demo identity per provider.
+        const personas = {
+          google: { email: 'demo.google@gmail.com', name: 'Georgia Okonkwo' },
+          apple: { email: 'demo.apple@icloud.com', name: 'Ana Petrov' },
+          x: { email: 'demo.x@x.com', name: 'Xavier Reyes' },
+        } as const
+        const p = personas[provider]
+        const existing = s.users.find(u => u.email === p.email)
+        if (existing) {
+          mutate(d => { d.sessionUserId = existing.id; touchLogin(d, existing.id) })
+          toast('success', `Welcome back, ${existing.name.split(' ')[0]}! (via ${provider})`)
+          return
+        }
+        mutate(d => {
+          const handle = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+          const u: User = {
+            id: 'u-' + shortId(), email: p.email, name: p.name, handle,
+            avatarHue: Math.floor(Math.random() * 360), balance: 100, kycTier: 0, kycStatus: 'none',
+            country: 'US', createdAt: Date.now(), isAdmin: false, suspended: false, riskFlags: [],
+            selfLimits: { dailyLossCap: null, coolOffUntil: null }, totalDeposited: 0, totalWithdrawn: 0,
+            watchlist: [], stats: { profit30d: 0, calibration: 0.5, resolvedCount: 0, winRate: 0, streak: 0 },
+            referralCode: (handle.toUpperCase() + shortId().toUpperCase()).slice(0, 8),
+            referredBy: null, referralRewardPaid: false, follows: [],
+            notificationPrefs: { email: true, push: false },
+            xp: 0, achievements: [], loginStreak: 0, lastLoginDay: '', lastTradeAt: null,
+            authProvider: provider,
+          }
+          d.users.push(u)
+          d.sessionUserId = u.id
+          touchLogin(d, u.id)
+          d.txs.unshift({ id: shortId(), userId: u.id, type: 'adjustment', amount: 100, status: 'completed', note: 'Welcome credit', createdAt: Date.now() })
+        })
+        toast('success', `Account created via ${provider[0].toUpperCase() + provider.slice(1)} — $100 welcome credit added.`)
+      },
+
+      adminSendTestEmail: (to) => {
+        mutate(d => {
+          d.settings.email.sent30d += 1
+          audit(d, 'comms.email-test', `Test email sent to ${to} via ${d.settings.email.provider}${d.settings.email.sandboxMode ? ' (sandbox)' : ''}`)
+        })
+        toast('success', `Test email queued to ${to} — check the provider dashboard for delivery`)
       },
 
       signOut: () => { mutate(d => { d.sessionUserId = null }) },
@@ -1112,7 +1160,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         try {
           const parsed = JSON.parse(raw) as AppState
           if (typeof parsed !== 'object' || parsed === null) return { ok: false, error: 'Not a JSON object.' }
-          if (parsed.version !== 6) return { ok: false, error: `Version mismatch: expected 6, got ${(parsed as any).version}.` }
+          if (parsed.version !== 7) return { ok: false, error: `Version mismatch: expected 7, got ${(parsed as any).version}.` }
           for (const key of ['users', 'markets', 'positions', 'orders', 'txs', 'notifications'] as const) {
             if (!Array.isArray(parsed[key])) return { ok: false, error: `Missing or invalid collection: ${key}` }
           }
