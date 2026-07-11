@@ -199,6 +199,24 @@ table.tbl th.num { text-align: right; }
 .nav-search { flex: 1; max-width: 340px; position: relative; }
 .nav-search input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px 8px 32px; color: var(--ink); font-size: 13px; }
 .nav-search .icon { position: absolute; left: 10px; top: 8px; color: var(--ink-3); }
+.nav-search input { padding-right: 30px; }
+.search-clear {
+  position: absolute; right: 6px; top: 5px; width: 24px; height: 24px;
+  border-radius: 6px; color: var(--ink-3); font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.search-clear:hover { background: var(--surface-3); color: var(--ink); }
+.search-pop {
+  position: absolute; top: 40px; left: 0; right: 0; z-index: 70;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); overflow: hidden; max-height: 420px; overflow-y: auto;
+}
+.search-pop .grp-label { padding: 8px 14px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 700; }
+.search-pop a, .search-pop button.hit {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 8px 14px; font-size: 13px; border-bottom: 1px solid var(--grid);
+}
+.search-pop a:hover, .search-pop button.hit:hover { background: var(--surface-2); }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .balance-chip { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
 .balance-chip .v { font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -18,6 +18,9 @@ import { Leaderboard } from './client/Leaderboard'
 import { Earn } from './client/Earn'
 import { Embed } from './client/Embed'
 import { Developers } from './client/Developers'
+import { Help } from './client/Help'
+import { AdminSupport } from './admin/Support'
+import { AdminUserDetail } from './admin/UserDetail'
 
 export const App = () => (
   <StoreProvider>
@@ -30,6 +33,7 @@ export const App = () => (
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/earn" element={<Earn />} />
           <Route path="/developers" element={<Developers />} />
+          <Route path="/help" element={<Help />} />
           <Route path="/wallet" element={<Wallet />} />
         </Route>
         <Route path="/embed/:id" element={<Embed />} />
@@ -39,6 +43,8 @@ export const App = () => (
           <Route path="markets/new" element={<MarketCreate />} />
           <Route path="proposals" element={<AdminProposals />} />
           <Route path="users" element={<AdminUsers />} />
+          <Route path="users/:id" element={<AdminUserDetail />} />
+          <Route path="support" element={<AdminSupport />} />
           <Route path="kyc" element={<AdminKyc />} />
           <Route path="finance" element={<AdminFinance />} />
           <Route path="liquidity" element={<AdminLiquidity />} />

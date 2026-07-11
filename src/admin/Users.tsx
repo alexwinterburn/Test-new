@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { Avatar, Empty, KycBadge, Modal } from '../components/ui'
 import { fmtAgo, fmtDate, fmtUsd } from '../lib/format'
@@ -37,7 +38,10 @@ export const AdminUsers = () => {
                     <div className="row" style={{ gap: 8 }}>
                       <Avatar user={u} />
                       <div>
-                        <div style={{ fontWeight: 650 }}>{u.name} {u.isAdmin && <span className="badge badge-accent">Ops</span>} {u.suspended && <span className="badge badge-critical">Suspended</span>}</div>
+                        <div style={{ fontWeight: 650 }}>
+                          <Link to={`/admin/users/${u.id}`} style={{ color: 'var(--accent)' }}>{u.name}</Link>
+                          {' '}{u.isAdmin && <span className="badge badge-accent">Ops</span>} {u.suspended && <span className="badge badge-critical">Frozen</span>}
+                        </div>
                         <div className="hint">@{u.handle} · {u.email} · {u.country}</div>
                       </div>
                     </div>

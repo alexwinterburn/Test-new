@@ -363,15 +363,54 @@ export const buildSeed = (): AppState => {
     { id: 'n-2', userId: 'u-demo', kind: 'watchlist-move' as const, title: 'Watchlist mover', text: 'Fed rate cut market moved 4pts in the last day.', link: '#/market/m-0', read: false, at: t - 0.6 * DAY },
   ]
 
+  const tickets = [
+    {
+      id: 'tk-1', ref: 'FS-1041', userId: 'u-priya', subject: 'Withdrawal stuck on pending for 6 hours',
+      category: 'Withdrawals', priority: 'urgent' as const, status: 'open' as const, assignee: null,
+      source: 'web' as const, createdAt: t - 0.3 * DAY, updatedAt: t - 0.3 * DAY,
+      messages: [
+        { id: 'tm-1', from: 'user' as const, authorId: 'u-priya', text: 'I withdrew 900 USDC on Base 6 hours ago and it still shows pending. TxHash never appeared. Please check — I need these funds today.', at: t - 0.3 * DAY },
+      ],
+    },
+    {
+      id: 'tk-2', ref: 'FS-1040', userId: 'u-sam', subject: 'How is the combo slip payout calculated?',
+      category: 'Trading', priority: 'normal' as const, status: 'pending' as const, assignee: 'u-admin',
+      source: 'web' as const, createdAt: t - 1.4 * DAY, updatedAt: t - 1.1 * DAY,
+      messages: [
+        { id: 'tm-2', from: 'user' as const, authorId: 'u-sam', text: 'If I place a 3-leg combo and 2 legs win, do I get anything?', at: t - 1.4 * DAY },
+        { id: 'tm-3', from: 'agent' as const, authorId: 'u-admin', text: 'Yes! Combos are baskets, not all-or-nothing parlays — each leg settles independently, so the two winning legs pay $1 per share. Full explanation is in the Help Centre under “Trading → Combo slips”. Anything else?', at: t - 1.1 * DAY },
+      ],
+    },
+    {
+      id: 'tk-3', ref: 'FS-1038', userId: 'u-marcus', subject: 'KYC document rejected — name mismatch',
+      category: 'Verification', priority: 'high' as const, status: 'solved' as const, assignee: 'u-admin',
+      source: 'zendesk' as const, zendeskId: '48211', createdAt: t - 6 * DAY, updatedAt: t - 5 * DAY,
+      messages: [
+        { id: 'tm-4', from: 'user' as const, authorId: 'u-marcus', text: 'My passport says Lee Ming Hui Marcus but my account says Marcus Lee — verification was rejected.', at: t - 6 * DAY },
+        { id: 'tm-5', from: 'note' as const, authorId: 'u-admin', text: 'Internal: name-order mismatch, common for SG passports. Approving manually per policy 4.2.', at: t - 5.2 * DAY },
+        { id: 'tm-6', from: 'agent' as const, authorId: 'u-admin', text: 'Sorted — we matched your passport name order manually and your Tier 1 verification is approved. Apologies for the friction.', at: t - 5 * DAY },
+      ],
+    },
+    {
+      id: 'tk-4', ref: 'FS-1035', userId: 'u-jonas', subject: 'Feature request: dark mode on the embed widget',
+      category: 'Other', priority: 'low' as const, status: 'closed' as const, assignee: 'u-admin',
+      source: 'email' as const, createdAt: t - 12 * DAY, updatedAt: t - 10 * DAY,
+      messages: [
+        { id: 'tm-7', from: 'user' as const, authorId: 'u-jonas', text: 'The embed widget looks great — can it follow my site theme?', at: t - 12 * DAY },
+        { id: 'tm-8', from: 'agent' as const, authorId: 'u-admin', text: 'It already respects prefers-color-scheme — thanks for the nudge, we added it to the docs. Closing this one.', at: t - 10 * DAY },
+      ],
+    },
+  ]
+
   const copyLinks = [
     { id: 'cl-1', followerId: 'u-sam', leaderId: 'u-dana', perTradeCap: 25, active: true, createdAt: t - 15 * DAY, mirrored: 340 },
   ]
 
   return {
-    version: 8,
+    version: 9,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
-    trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys, notifications, copyLinks,
+    trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys, notifications, copyLinks, tickets,
     settings: {
       tradingFeeBps: 100,
       withdrawalFeeFlat: 0,
@@ -419,6 +458,7 @@ export const buildSeed = (): AppState => {
           { id: 'tpl-5', name: 'Inactivity win-back', trigger: 'reminder-trade' },
         ],
       },
+      zendesk: { connected: true, subdomain: 'foresight', syncEnabled: true, lastSyncAt: t - 0.02 * DAY },
       savedReports: [
         { id: 'rep-1', name: 'Weekly growth snapshot', metrics: ['volume', 'signups'], rangeDays: 7, createdAt: t - 10 * DAY },
         { id: 'rep-2', name: 'Monthly board pack', metrics: ['volume', 'trades', 'signups', 'fees'], rangeDays: 30, createdAt: t - 25 * DAY },

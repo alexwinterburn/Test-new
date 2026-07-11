@@ -1,19 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppState, ComplianceAlert, Direction, KycTier, Market, MarketStatus, NotificationKind, Order, Outcome, Position, Settings, Side, SlipLeg, User } from './types'
+import type { AppState, ComplianceAlert, Direction, KycTier, Market, MarketStatus, NotificationKind, Order, Outcome, Position, Settings, Side, SlipLeg, TicketPriority, TicketStatus, User } from './types'
 import { ACHIEVEMENTS, XP, dayKey, levelForXp } from './gamification'
 import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v8'
+const LS_KEY = 'foresight-demo-state-v9'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 8) return parsed
+      if (parsed.version === 9) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -108,6 +108,15 @@ interface StoreApi {
   adminToggleWebhook: (id: string) => void
   adminDeleteWebhook: (id: string) => void
   adminSendNotification: (target: 'all' | string, title: string, text: string) => void
+  createTicket: (subject: string, category: string, priority: TicketPriority, text: string) => void
+  replyTicket: (ticketId: string, text: string) => void
+  userCloseTicket: (ticketId: string) => void
+  adminReplyTicket: (ticketId: string, text: string, internal: boolean) => void
+  adminSetTicketStatus: (ticketId: string, status: TicketStatus) => void
+  adminSetTicketPriority: (ticketId: string, priority: TicketPriority) => void
+  adminAssignTicket: (ticketId: string, assignee: string | null) => void
+  adminResetTwoFactor: (userId: string) => void
+  adminAddRiskFlag: (userId: string, flag: string) => void
   adminSaveReport: (name: string, metrics: string[], rangeDays: number) => void
   adminDeleteReport: (id: string) => void
   exportStateJson: () => string
@@ -1169,7 +1178,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         try {
           const parsed = JSON.parse(raw) as AppState
           if (typeof parsed !== 'object' || parsed === null) return { ok: false, error: 'Not a JSON object.' }
-          if (parsed.version !== 8) return { ok: false, error: `Version mismatch: expected 8, got ${(parsed as any).version}.` }
+          if (parsed.version !== 9) return { ok: false, error: `Version mismatch: expected 9, got ${(parsed as any).version}.` }
           for (const key of ['users', 'markets', 'positions', 'orders', 'txs', 'notifications'] as const) {
             if (!Array.isArray(parsed[key])) return { ok: false, error: `Missing or invalid collection: ${key}` }
           }
@@ -1229,6 +1238,106 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           du.security.addressBook = du.security.addressBook.filter(a => a.id !== addressId)
         })
         toast('info', 'Address removed')
+      },
+
+      createTicket: (subject, category, priority, text) => {
+        const u = currentUser
+        if (!u) return
+        mutate(d => {
+          const ref = 'FS-' + (1042 + d.tickets.length)
+          d.tickets.unshift({
+            id: shortId(), ref, userId: u.id, subject, category, priority, status: 'open',
+            assignee: null, source: 'web', createdAt: Date.now(), updatedAt: Date.now(),
+            messages: [{ id: shortId(), from: 'user', authorId: u.id, text, at: Date.now() }],
+          })
+          notify(d, u.id, 'support', `Ticket ${ref} created`, `"${subject}" — our team will reply here and by email.`, '#/help')
+        })
+        toast('success', 'Ticket created — track it under Help → My tickets')
+      },
+
+      replyTicket: (ticketId, text) => {
+        const u = currentUser
+        if (!u) return
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)
+          if (!tk) return
+          tk.messages.push({ id: shortId(), from: 'user', authorId: u.id, text, at: Date.now() })
+          tk.status = 'open'
+          tk.updatedAt = Date.now()
+        })
+        toast('success', 'Reply sent')
+      },
+
+      userCloseTicket: (ticketId) => {
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)
+          if (!tk) return
+          tk.status = 'solved'
+          tk.updatedAt = Date.now()
+        })
+        toast('success', 'Ticket marked as solved — thanks!')
+      },
+
+      adminReplyTicket: (ticketId, text, internal) => {
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)!
+          tk.messages.push({ id: shortId(), from: internal ? 'note' : 'agent', authorId: d.sessionUserId ?? 'system', text, at: Date.now() })
+          tk.updatedAt = Date.now()
+          if (!internal) {
+            tk.status = 'pending'
+            if (!tk.assignee) tk.assignee = d.sessionUserId
+            notify(d, tk.userId, 'support', `Support replied — ${tk.ref}`, text.slice(0, 90) + (text.length > 90 ? '…' : ''), '#/help')
+          }
+          audit(d, internal ? 'support.note' : 'support.reply', `${tk.ref} "${tk.subject.slice(0, 40)}"`)
+        })
+        toast('success', internal ? 'Internal note added' : 'Reply sent to customer')
+      },
+
+      adminSetTicketStatus: (ticketId, status) => {
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)!
+          tk.status = status
+          tk.updatedAt = Date.now()
+          if (status === 'solved') notify(d, tk.userId, 'support', `Ticket ${tk.ref} solved ✅`, `"${tk.subject}" was marked solved. Reply within 7 days to reopen.`, '#/help')
+          audit(d, 'support.status', `${tk.ref} → ${status}`)
+        })
+        toast('info', `Ticket ${status}`)
+      },
+
+      adminSetTicketPriority: (ticketId, priority) => {
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)!
+          tk.priority = priority
+          tk.updatedAt = Date.now()
+          audit(d, 'support.priority', `${tk.ref} → ${priority}`)
+        })
+      },
+
+      adminAssignTicket: (ticketId, assignee) => {
+        mutate(d => {
+          const tk = d.tickets.find(x => x.id === ticketId)!
+          tk.assignee = assignee
+          tk.updatedAt = Date.now()
+        })
+      },
+
+      adminResetTwoFactor: (userId) => {
+        mutate(d => {
+          const u = d.users.find(x => x.id === userId)!
+          u.security.twoFactorEnabled = false
+          notify(d, userId, 'kyc', 'Two-factor authentication was reset', 'Support reset your 2FA after identity checks. Please re-enrol from your wallet as soon as possible.', '#/wallet')
+          audit(d, 'user.2fa-reset', `Reset 2FA for @${u.handle} (support-verified request)`)
+        })
+        toast('info', '2FA reset — user notified to re-enrol')
+      },
+
+      adminAddRiskFlag: (userId, flag) => {
+        mutate(d => {
+          const u = d.users.find(x => x.id === userId)!
+          u.riskFlags.push(flag)
+          audit(d, 'risk.flag', `Flag added to @${u.handle}: ${flag}`)
+        })
+        toast('info', 'Risk flag added')
       },
 
       resetDemo: () => {

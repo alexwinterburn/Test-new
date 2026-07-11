@@ -191,7 +191,34 @@ export interface PriceAlert {
 export type NotificationKind =
   | 'price-alert' | 'settlement' | 'kyc' | 'withdrawal' | 'reward'
   | 'reminder-kyc' | 'reminder-trade' | 'watchlist-move' | 'closing-soon'
-  | 'achievement' | 'level-up' | 'admin-message' | 'copy-trade'
+  | 'achievement' | 'level-up' | 'admin-message' | 'copy-trade' | 'support'
+
+export type TicketStatus = 'open' | 'pending' | 'solved' | 'closed'
+export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent'
+
+export interface TicketMessage {
+  id: string
+  from: 'user' | 'agent' | 'note' // note = internal, never shown to the client
+  authorId: string
+  text: string
+  at: number
+}
+
+export interface SupportTicket {
+  id: string
+  ref: string // human ref e.g. FS-1042
+  userId: string
+  subject: string
+  category: string
+  priority: TicketPriority
+  status: TicketStatus
+  assignee: string | null
+  source: 'web' | 'zendesk' | 'email'
+  zendeskId?: string
+  createdAt: number
+  updatedAt: number
+  messages: TicketMessage[]
+}
 
 export interface AppNotification {
   id: string
@@ -302,6 +329,7 @@ export interface Settings {
     templates: { id: string; name: string; trigger: string }[]
   }
   savedReports: SavedReport[]
+  zendesk: { connected: boolean; subdomain: string; syncEnabled: boolean; lastSyncAt: number | null }
   dailyVolume: { date: string; volume: number; trades: number; signups: number }[]
   announcement: { text: string; kind: 'info' | 'warning' | 'critical'; at: number } | null
 }
@@ -325,5 +353,6 @@ export interface AppState {
   apiKeys: ApiKey[]
   notifications: AppNotification[]
   copyLinks: CopyLink[]
+  tickets: SupportTicket[]
   settings: Settings
 }

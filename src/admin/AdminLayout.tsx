@@ -34,6 +34,7 @@ export const AdminLayout = () => {
   const wdPending = state.txs.filter(t => t.type === 'withdrawal' && t.status === 'pending').length
   const propPending = state.proposals.filter(p => p.status === 'pending').length
   const complianceOpen = state.complianceAlerts.filter(a => a.status === 'open').length
+  const ticketsOpen = state.tickets.filter(t => t.status === 'open').length
   const resolving = state.markets.filter(m => m.status === 'resolving' || m.status === 'disputed').length
 
   return (
@@ -48,6 +49,7 @@ export const AdminLayout = () => {
         <div className="grp">Customers</div>
         <Item to="/admin/users" icon="👥" label="Users" />
         <Item to="/admin/kyc" icon="🪪" label="KYC queue" count={kycPending} />
+        <Item to="/admin/support" icon="🎫" label="Support desk" count={ticketsOpen} />
         <div className="grp">Treasury & risk</div>
         <Item to="/admin/finance" icon="🏦" label="Finance" count={wdPending} />
         <Item to="/admin/liquidity" icon="💧" label="Liquidity desk" />
