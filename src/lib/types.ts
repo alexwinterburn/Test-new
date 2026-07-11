@@ -152,6 +152,10 @@ export interface User {
   follows: string[] // user ids this account follows (copy-trading)
   notificationPrefs: { email: boolean; push: boolean }
   authProvider: 'email' | 'google' | 'apple' | 'x'
+  security: {
+    twoFactorEnabled: boolean
+    addressBook: { id: string; label: string; address: string; asset: string; network: string; addedAt: number }[]
+  }
   // gamification
   xp: number
   achievements: string[] // achievement ids

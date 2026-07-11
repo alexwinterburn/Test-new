@@ -190,6 +190,7 @@ const mkUser = (
   follows: [],
   notificationPrefs: { email: true, push: false },
   authProvider: 'email' as const,
+  security: { twoFactorEnabled: false, addressBook: [] },
   xp: 0,
   achievements: [],
   loginStreak: 1,
@@ -240,6 +241,10 @@ export const buildSeed = (): AppState => {
     mkUser('u-dana', 'dana@example.com', 'Dana Okafor', 'danapredicts', 150, 18240.5, 2, 'approved', 'NG', false, {
       totalDeposited: 40000, totalWithdrawn: 12000,
       stats: { profit30d: 4830.2, calibration: 0.88, resolvedCount: 62, winRate: 0.64, streak: 7 },
+      security: {
+        twoFactorEnabled: true,
+        addressBook: [{ id: 'ab-1', label: 'Ledger cold wallet', address: '0x9aF3…D41c', asset: 'USDC', network: 'Ethereum', addedAt: now() - 60 * DAY }],
+      },
       xp: 4850, achievements: ['first-trade', 'whale', 'market-maker', 'prophet', 'social', 'streak-7', 'diversified'], loginStreak: 23, lastTradeAt: now() - 0.4 * DAY,
     }),
     mkUser('u-marcus', 'marcus@example.com', 'Marcus Lee', 'mlee', 30, 512.75, 1, 'approved', 'SG', false, {
@@ -363,7 +368,7 @@ export const buildSeed = (): AppState => {
   ]
 
   return {
-    version: 7,
+    version: 8,
     sessionUserId: 'u-demo',
     users, markets, positions, orders, txs, kycRequests, proposals, audit,
     trades, complianceAlerts, alerts: [], slip: [], lps, apiKeys, notifications, copyLinks,

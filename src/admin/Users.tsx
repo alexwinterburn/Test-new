@@ -42,7 +42,12 @@ export const AdminUsers = () => {
                       </div>
                     </div>
                   </td>
-                  <td><KycBadge user={u} /></td>
+                  <td>
+                    <div className="stack" style={{ gap: 4 }}>
+                      <KycBadge user={u} />
+                      {u.security.twoFactorEnabled && <span className="badge badge-good"><span className="dot" />2FA</span>}
+                    </div>
+                  </td>
                   <td className="num">{fmtUsd(u.balance)}</td>
                   <td className="num">{fmtUsd(openPositionCost(u.id))}</td>
                   <td className="num">{fmtUsd(u.totalDeposited, 0)}</td>

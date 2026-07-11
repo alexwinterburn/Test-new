@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { fmtDateTime, fmtUsd } from '../lib/format'
-import { Empty, KycBadge, Switch, Tabs } from '../components/ui'
+import { Empty, KycBadge, Modal, Switch, Tabs } from '../components/ui'
 import { KycModal } from '../components/auth'
 
 const ASSETS = [
@@ -19,7 +19,7 @@ const depositAddress = (tpl: string, userId: string) =>
   tpl + userId.replace(/[^a-z0-9]/gi, '').slice(-6).padEnd(6, '0')
 
 export const Wallet = () => {
-  const { state, currentUser, depositCrypto, confirmDeposit, withdraw, setSelfLimits, setNotificationPrefs, toast } = useStore()
+  const { state, currentUser, depositCrypto, confirmDeposit, withdraw, setSelfLimits, setNotificationPrefs, setTwoFactor, addAddress, removeAddress, toast } = useStore()
   const { openAuth } = useOutletContext<{ openAuth: () => void }>()
   const [tab, setTab] = useState<'deposit' | 'withdraw'>('deposit')
   const [amount, setAmount] = useState('100')
@@ -30,6 +30,11 @@ export const Wallet = () => {
   const [kycReason, setKycReason] = useState<string | undefined>()
   const [error, setError] = useState('')
   const [lossCap, setLossCap] = useState('')
+  const [twoFaCode, setTwoFaCode] = useState('')
+  const [twoFaModal, setTwoFaModal] = useState<null | 'enable' | 'disable'>(null)
+  const [twoFaModalCode, setTwoFaModalCode] = useState('')
+  const [addrLabel, setAddrLabel] = useState('')
+  const [saveAddr, setSaveAddr] = useState(false)
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => { if (confirmTimer.current) clearTimeout(confirmTimer.current) }, [])
@@ -37,7 +42,7 @@ export const Wallet = () => {
   // the component stays mounted across sign-in/out — reset per-user UI state
   const userKey = currentUser?.id
   useEffect(() => {
-    setTab('deposit'); setPendingTxId(null); setError(''); setDestAddr(''); setAmount('100')
+    setTab('deposit'); setPendingTxId(null); setError(''); setDestAddr(''); setAmount('100'); setTwoFaCode(''); setTwoFaModal(null)
   }, [userKey])
 
   if (!currentUser) {
@@ -69,13 +74,17 @@ export const Wallet = () => {
   const doWithdraw = () => {
     setError('')
     if (amt <= 0) { setError('Enter an amount.'); return }
-    if (destAddr.trim().length < 8) { setError('Enter a destination address.'); return }
-    const res = withdraw(amt, `${sel.asset} on ${sel.network} → ${destAddr.trim().slice(0, 10)}…`)
+    if (destAddr.trim().length < 8) { setError('Enter or select a destination address.'); return }
+    const res = withdraw(amt, `${sel.asset} on ${sel.network} → ${destAddr.trim().slice(0, 10)}…`, twoFaCode || undefined)
     if (!res.ok) {
       if (res.needsKyc) { setKycReason(res.error); setKycOpen(true) }
       else setError(res.error ?? 'Withdrawal failed')
+      return
     }
+    if (saveAddr && !knownAddr) addAddress(addrLabel.trim() || 'My wallet', destAddr.trim(), sel.asset, sel.network)
+    setTwoFaCode(''); setSaveAddr(false); setAddrLabel('')
   }
+  const knownAddr = currentUser.security.addressBook.some(a => a.address === destAddr.trim() && destAddr.trim().length >= 8)
 
   return (
     <main className="page-inner">
@@ -231,10 +240,31 @@ export const Wallet = () => {
               </>
             ) : (
               <>
+                {currentUser.security.addressBook.length > 0 && (
+                  <div className="field">
+                    <label>Saved addresses</label>
+                    <select className="select" value={knownAddr ? destAddr : ''} onChange={e => setDestAddr(e.target.value)}>
+                      <option value="">— paste a new address —</option>
+                      {currentUser.security.addressBook.map(a => (
+                        <option key={a.id} value={a.address}>{a.label} · {a.asset} ({a.network}) · {a.address}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="field">
                   <label>Destination address</label>
                   <input className="input" placeholder={sel.network === 'Bitcoin' ? 'bc1q…' : '0x…'} value={destAddr} onChange={e => setDestAddr(e.target.value)} />
                 </div>
+                {destAddr.trim().length >= 8 && !knownAddr && (
+                  <>
+                    <div className="badge badge-warning" style={{ textTransform: 'none' }}><span className="dot" />New address — double-check it. Transfers are irreversible.</div>
+                    <label className="row" style={{ gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={saveAddr} onChange={e => setSaveAddr(e.target.checked)} />
+                      Save to address book as
+                      <input className="input" style={{ width: 130, padding: '4px 8px' }} placeholder="label" value={addrLabel} onChange={e => setAddrLabel(e.target.value)} onClick={e => e.stopPropagation()} />
+                    </label>
+                  </>
+                )}
                 <div className="field">
                   <label>Amount ($)</label>
                   <input className="input" type="number" min={0} value={amount} onChange={e => setAmount(e.target.value)} />
@@ -244,12 +274,38 @@ export const Wallet = () => {
                   the finance team; your daily cap is {currentUser.kycTier >= 1 ? fmtUsd(state.settings.withdrawalDailyCap[currentUser.kycTier as 1 | 2], 0) : '—'}.
                   Network fee is paid by the platform.
                 </div>
+                {currentUser.security.twoFactorEnabled && (
+                  <div className="field">
+                    <label>🔐 Authenticator code (2FA)</label>
+                    <input className="input" inputMode="numeric" maxLength={6} placeholder="6-digit code" value={twoFaCode} onChange={e => setTwoFaCode(e.target.value.replace(/[^0-9]/g, ''))} />
+                    <span className="hint">Required for every withdrawal. Demo: any 6 digits — production verifies TOTP (RFC 6238).</span>
+                  </div>
+                )}
                 {error && <div style={{ color: 'var(--critical)', fontSize: 13 }}>{error}</div>}
                 <button className="btn btn-primary btn-lg" onClick={doWithdraw}>
                   Withdraw {fmtUsd(amt, 0)} in {sel.asset}
                 </button>
               </>
             )}
+          </div>
+
+          <div className="card card-pad stack" style={{ gap: 10 }}>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>🔐 Security</div>
+              {currentUser.security.twoFactorEnabled
+                ? <span className="badge badge-good"><span className="dot" />2FA on</span>
+                : <span className="badge badge-warning"><span className="dot" />2FA off</span>}
+            </div>
+            <button className="btn btn-sm" onClick={() => { setTwoFaModal(currentUser.security.twoFactorEnabled ? 'disable' : 'enable'); setTwoFaModalCode('') }}>
+              {currentUser.security.twoFactorEnabled ? 'Disable two-factor authentication' : 'Enable two-factor authentication'}
+            </button>
+            <div style={{ fontWeight: 700, fontSize: 13, marginTop: 4 }}>Address book</div>
+            {currentUser.security.addressBook.length ? currentUser.security.addressBook.map(a => (
+              <div key={a.id} className="row" style={{ fontSize: 12.5, justifyContent: 'space-between' }}>
+                <span><strong>{a.label}</strong> <span className="muted">· {a.asset} ({a.network})</span><br /><code style={{ fontSize: 11 }}>{a.address}</code></span>
+                <button className="btn btn-sm btn-ghost" style={{ color: 'var(--critical)' }} onClick={() => removeAddress(a.id)} aria-label={`Remove ${a.label}`}>✕</button>
+              </div>
+            )) : <span className="hint">No saved addresses yet — save one during your next withdrawal.</span>}
           </div>
 
           <div className="card card-pad stack" style={{ gap: 8 }}>
@@ -264,6 +320,37 @@ export const Wallet = () => {
         </div>
       </div>
       {kycOpen && <KycModal reason={kycReason} onClose={() => setKycOpen(false)} />}
+      {twoFaModal && (
+        <Modal title={twoFaModal === 'enable' ? 'Enable two-factor authentication' : 'Disable two-factor authentication'} onClose={() => setTwoFaModal(null)}>
+          {twoFaModal === 'enable' ? (
+            <>
+              <p className="hint">
+                Scan this secret with Google Authenticator, Authy or 1Password, then enter the 6-digit code it shows.
+                Once enabled, every withdrawal requires a fresh code.
+              </p>
+              <div className="card card-pad" style={{ textAlign: 'center', background: 'var(--surface-2)' }}>
+                <div style={{ fontSize: 40, letterSpacing: 2 }} aria-hidden="true">▦</div>
+                <code style={{ fontWeight: 800, letterSpacing: '0.15em' }}>FRST-2K9L-XM4P-QW7Z</code>
+                <div className="hint" style={{ marginTop: 4 }}>(simulated QR / secret — production issues a real TOTP seed)</div>
+              </div>
+            </>
+          ) : (
+            <p className="hint">Enter a current authenticator code to confirm turning 2FA off. Withdrawals will no longer require a code — not recommended.</p>
+          )}
+          <div className="field">
+            <label>6-digit code</label>
+            <input className="input" inputMode="numeric" maxLength={6} placeholder="123456" value={twoFaModalCode} onChange={e => setTwoFaModalCode(e.target.value.replace(/[^0-9]/g, ''))} autoFocus />
+            <span className="hint">Demo accepts any 6 digits.</span>
+          </div>
+          <button
+            className={'btn btn-lg ' + (twoFaModal === 'enable' ? 'btn-primary' : 'btn-danger')}
+            disabled={twoFaModalCode.length !== 6}
+            onClick={() => { const r = setTwoFactor(twoFaModal === 'enable', twoFaModalCode); if (r.ok) setTwoFaModal(null) }}
+          >
+            {twoFaModal === 'enable' ? 'Verify & enable 2FA' : 'Disable 2FA'}
+          </button>
+        </Modal>
+      )}
     </main>
   )
 }

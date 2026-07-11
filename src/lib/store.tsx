@@ -6,14 +6,14 @@ import { buildSeed } from './seed'
 import { applyBuy, applySell, price, quoteBuy, quoteSell, seedPools } from './engine'
 import { fmtCents, fmtUsd, shortId } from './format'
 
-const LS_KEY = 'foresight-demo-state-v7'
+const LS_KEY = 'foresight-demo-state-v8'
 
 const load = (): AppState => {
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.version === 7) return parsed
+      if (parsed.version === 8) return parsed
     }
   } catch { /* fall through to reseed */ }
   return buildSeed()
@@ -47,7 +47,10 @@ interface StoreApi {
 
   depositCrypto: (amount: number, asset: string, network: string) => string // returns tx id (pending until confirmed)
   confirmDeposit: (txId: string) => void
-  withdraw: (amount: number, method: string) => { ok: boolean; error?: string; pending?: boolean; needsKyc?: boolean }
+  withdraw: (amount: number, method: string, twoFactorCode?: string) => { ok: boolean; error?: string; pending?: boolean; needsKyc?: boolean; needs2fa?: boolean }
+  setTwoFactor: (enabled: boolean, code: string) => { ok: boolean; error?: string }
+  addAddress: (label: string, address: string, asset: string, network: string) => void
+  removeAddress: (addressId: string) => void
   setNotificationPrefs: (prefs: User['notificationPrefs']) => void
 
   addLiquidity: (marketId: string, amount: number) => TradeResult
@@ -417,6 +420,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             notificationPrefs: { email: true, push: false },
             xp: 0, achievements: [], loginStreak: 0, lastLoginDay: '', lastTradeAt: null,
             authProvider: 'email',
+            security: { twoFactorEnabled: false, addressBook: [] },
           }
           d.users.push(u)
           d.sessionUserId = u.id
@@ -455,6 +459,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             notificationPrefs: { email: true, push: false },
             xp: 0, achievements: [], loginStreak: 0, lastLoginDay: '', lastTradeAt: null,
             authProvider: provider,
+            security: { twoFactorEnabled: false, addressBook: [] },
           }
           d.users.push(u)
           d.sessionUserId = u.id
@@ -740,10 +745,14 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         return { ok: true }
       },
 
-      withdraw: (amount, method) => {
+      withdraw: (amount, method, twoFactorCode) => {
         const u = currentUser
         if (!u) return { ok: false, error: 'Sign in first.' }
         if (u.kycTier < 1) return { ok: false, needsKyc: true, error: 'Identity verification (Tier 1) is required before withdrawing.' }
+        if (u.security.twoFactorEnabled) {
+          if (!twoFactorCode) return { ok: false, needs2fa: true, error: 'Enter your 6-digit authenticator code to approve this withdrawal.' }
+          if (!/^\d{6}$/.test(twoFactorCode)) return { ok: false, needs2fa: true, error: 'Invalid code — 6 digits from your authenticator app.' }
+        }
         if (amount <= 0 || amount > u.balance) return { ok: false, error: 'Invalid amount.' }
         const cap = s.settings.withdrawalDailyCap[u.kycTier as 1 | 2]
         if (amount > cap) return { ok: false, error: `Tier ${u.kycTier} daily withdrawal cap is ${fmtUsd(cap, 0)}. Upgrade to Tier 2 for higher limits.`, needsKyc: u.kycTier === 1 }
@@ -1160,7 +1169,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         try {
           const parsed = JSON.parse(raw) as AppState
           if (typeof parsed !== 'object' || parsed === null) return { ok: false, error: 'Not a JSON object.' }
-          if (parsed.version !== 7) return { ok: false, error: `Version mismatch: expected 7, got ${(parsed as any).version}.` }
+          if (parsed.version !== 8) return { ok: false, error: `Version mismatch: expected 8, got ${(parsed as any).version}.` }
           for (const key of ['users', 'markets', 'positions', 'orders', 'txs', 'notifications'] as const) {
             if (!Array.isArray(parsed[key])) return { ok: false, error: `Missing or invalid collection: ${key}` }
           }
@@ -1186,6 +1195,40 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           audit(d, 'data.prune', `Pruned ${removed.toLocaleString()} price points; trimmed trade + audit logs`)
         })
         toast('success', 'History pruned — storage compacted')
+      },
+
+      setTwoFactor: (enabled, code) => {
+        const u = currentUser
+        if (!u) return { ok: false, error: 'Sign in first.' }
+        if (!/^\d{6}$/.test(code)) return { ok: false, error: 'Enter the 6-digit code from your authenticator app.' }
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          du.security.twoFactorEnabled = enabled
+          notify(d, u.id, 'kyc', enabled ? 'Two-factor authentication enabled 🔐' : 'Two-factor authentication disabled',
+            enabled ? 'Withdrawals now require an authenticator code. Keep your recovery codes safe.' : 'Your account no longer requires a 2FA code for withdrawals — we recommend re-enabling it.', '#/wallet')
+        })
+        toast('success', enabled ? '2FA enabled — withdrawals now require your authenticator code' : '2FA disabled')
+        return { ok: true }
+      },
+
+      addAddress: (label, address, asset, network) => {
+        const u = currentUser
+        if (!u) return
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          du.security.addressBook.push({ id: shortId(), label, address, asset, network, addedAt: Date.now() })
+        })
+        toast('success', `Address "${label}" saved to your address book`)
+      },
+
+      removeAddress: (addressId) => {
+        const u = currentUser
+        if (!u) return
+        mutate(d => {
+          const du = d.users.find(x => x.id === u.id)!
+          du.security.addressBook = du.security.addressBook.filter(a => a.id !== addressId)
+        })
+        toast('info', 'Address removed')
       },
 
       resetDemo: () => {
